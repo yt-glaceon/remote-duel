@@ -32,7 +32,10 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
       <div className="panel-head">
         <strong>デュエル {state.duelNo}</strong>
         <span className="muted small">
-          通算 {displayName(state, 'p1')} {rec.p1}勝 − {rec.p2}勝 {displayName(state, 'p2')}
+          通算{' '}
+          {rec.wins.length === 0 && rec.draws === 0
+            ? 'まだなし'
+            : rec.wins.map((w) => `${w.name} ${w.wins}勝`).join('・')}
           {rec.draws > 0 && `(引き分け ${rec.draws})`}
         </span>
       </div>
@@ -102,7 +105,7 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
             <span className="spacer" />
             <button
               className="small-btn"
-              disabled={rec.p1 + rec.p2 + rec.draws === 0}
+              disabled={rec.wins.length === 0 && rec.draws === 0}
               onClick={() => confirm('通算の戦績を 0 に戻しますか?') && dispatch({ type: 'resetRecord' })}
             >
               戦績をリセット

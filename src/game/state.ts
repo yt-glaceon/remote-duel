@@ -49,9 +49,10 @@ export const REASON_LABEL: Record<ResultReason, string> = {
   special: '特殊勝利',
   other: 'その他',
 };
-/** winner が null なら引き分け */
-export type DuelResult = { winner: Seat | null; reason: ResultReason; at: number };
-export type DuelRecord = { p1: number; p2: number; draws: number };
+/** winner が null なら引き分け。席の持ち主は入れ替わるので、勝者の名前も残す */
+export type DuelResult = { winner: Seat | null; winnerName: string | null; reason: ResultReason; at: number };
+/** 通算の戦績。席ではなく名前ごとに数える */
+export type DuelRecord = { wins: { name: string; wins: number }[]; draws: number };
 
 export type Action =
   | { type: 'lpAdd'; seat: Seat; delta: number }
@@ -96,8 +97,54 @@ export function initialState(): GameState {
     lastRoll: null,
     duelNo: 1,
     result: null,
-    record: { p1: 0, p2: 0, draws: 0 },
+    record: { wins: [], draws: 0 },
   };
+}
+
+/** 席の入れ替えができるのは、決着後か、まだ何もしていないデュエルのときだけ */
+export function canChangeSeats(st: GameState): boolean {
+  if (st.result) return true;
+  return (
+    st.turn === 1 &&
+    st.phase === 'DP' &&
+    st.chain.length === 0 &&
+    st.players.p1.lp === START_LP &&
+    st.players.p2.lp === START_LP
+  );
+}
+
+/** その clientId の人が座っている席。いなければ null(clientId はホストだけが持つ) */
+export function seatOf(st: GameState, clientId: string | null | undefined): Seat | null {
+  if (!clientId) return null;
+  return SEATS.find((s) => st.players[s].clientId === clientId) ?? null;
+}
+
+/**
+ * 席の持ち主を差し替える(ホストだけが使う)。to が null なら観戦に回る。
+ * LP などの盤面はそのまま残し、名前と clientId だけを移す
+ */
+export function moveSeat(st: GameState, clientId: string, name: string, to: Seat | null): GameState {
+  const from = seatOf(st, clientId);
+  if (from === to) return st;
+  const players = { ...st.players };
+  if (from) players[from] = { ...players[from], clientId: null, name: '' };
+  if (to) players[to] = { ...players[to], clientId, name: name.slice(0, 20) };
+  const who = name || '(名前なし)';
+  const text = to
+    ? `${who}が${to === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の席に着きました`
+    : `${who}が観戦に回りました`;
+  return appendLog({ ...st, players, version: st.version + 1 }, null, text);
+}
+
+/** 1手戻すときも、席の持ち主は戻さない(交代した後で戻すと、前の人に席の権利が戻ってしまう) */
+export function keepSeatOwners(prev: GameState, cur: GameState): GameState {
+  const players = { ...prev.players };
+  for (const s of SEATS) {
+    if (players[s].clientId !== cur.players[s].clientId) {
+      players[s] = { ...players[s], clientId: cur.players[s].clientId, name: cur.players[s].name };
+    }
+  }
+  return { ...prev, players };
 }
 
 /** 盤面だけを開始時に戻す(名前・先攻・戦績・履歴は残す) */
@@ -118,14 +165,22 @@ function freshBoard(st: GameState, firstPlayer: Seat): GameState {
   };
 }
 
+const RECORD_NAMES_MAX = 50;
+
 function addResult(record: DuelRecord, r: DuelResult, sign: 1 | -1): DuelRecord {
-  const key = r.winner ?? 'draws';
-  return { ...record, [key]: Math.max(0, record[key] + sign) };
+  if (r.winnerName === null) return { ...record, draws: Math.max(0, record.draws + sign) };
+  const name = r.winnerName;
+  const wins = record.wins.some((w) => w.name === name)
+    ? record.wins.map((w) => (w.name === name ? { name, wins: w.wins + sign } : w))
+    : [...record.wins, { name, wins: sign }];
+  // 0 勝になった名前は一覧から外す
+  return { ...record, wins: wins.filter((w) => w.wins > 0).slice(-RECORD_NAMES_MAX) };
 }
 
 export function resultText(st: GameState, r: DuelResult): string {
   const reason = REASON_LABEL[r.reason];
-  return r.winner ? `${displayName(st, r.winner)}の勝ち(${reason})` : `引き分け(${reason})`;
+  if (!r.winner) return `引き分け(${reason})`;
+  return `${r.winnerName ?? displayName(st, r.winner)}の勝ち(${reason})`;
 }
 
 export function displayName(st: GameState, seat: Seat): string {
@@ -228,7 +283,12 @@ function step(st: GameState, a: Action, by: Seat): GameState {
     }
     case 'declareResult': {
       if (st.result) return st;
-      const result: DuelResult = { winner: a.winner, reason: a.reason, at: Date.now() };
+      const result: DuelResult = {
+        winner: a.winner,
+        winnerName: a.winner ? displayName(st, a.winner) : null,
+        reason: a.reason,
+        at: Date.now(),
+      };
       const record = addResult(st.record, result, 1);
       return appendLog({ ...st, result, record }, by, `デュエル${st.duelNo}: ${resultText(st, result)}`);
     }
@@ -249,9 +309,8 @@ function step(st: GameState, a: Action, by: Seat): GameState {
       );
     }
     case 'resetRecord': {
-      const { p1, p2, draws } = st.record;
-      if (p1 + p2 + draws === 0) return st;
-      return appendLog({ ...st, record: { p1: 0, p2: 0, draws: 0 } }, by, '通算の戦績をリセット');
+      if (st.record.wins.length === 0 && st.record.draws === 0) return st;
+      return appendLog({ ...st, record: { wins: [], draws: 0 } }, by, '通算の戦績をリセット');
     }
     case 'undo':
       return st;
@@ -330,12 +389,22 @@ export function normalizeState(v: unknown): GameState | null {
     lp: lp(p.lp),
     clientId: typeof p.clientId === 'string' ? p.clientId : null,
   });
-  const rec = (s.record ?? {}) as Partial<DuelRecord>;
+  const players = { p1: player(s.players.p1), p2: player(s.players.p2) };
+  const rec = (s.record ?? {}) as Partial<DuelRecord> & { p1?: unknown; p2?: unknown };
   const count = (n: unknown) => (isInt(n, 0, 1_000_000) ? n : 0);
+  const wins = Array.isArray(rec.wins)
+    ? rec.wins
+        .filter((w) => w && typeof w.name === 'string' && count(w.wins) > 0)
+        .slice(-RECORD_NAMES_MAX)
+        .map((w) => ({ name: text(w.name, 20), wins: count(w.wins) }))
+    : // 席ごとに数えていた古い形式は、いまの席の名前で数え直す
+      (['p1', 'p2'] as const)
+        .map((k) => ({ name: players[k].name || (k === 'p1' ? 'プレイヤー1' : 'プレイヤー2'), wins: count(rec[k]) }))
+        .filter((w) => w.wins > 0);
   const r = s.result as DuelResult | null | undefined;
   return {
     version: isInt(s.version, 0, Number.MAX_SAFE_INTEGER) ? s.version : 1,
-    players: { p1: player(s.players.p1), p2: player(s.players.p2) },
+    players,
     turn: isInt(s.turn, 1, 1_000_000) ? s.turn : 1,
     turnPlayer: isSeat(s.turnPlayer) ? s.turnPlayer : 'p1',
     // 後から足した項目がない古い保存データは、既定値で補って読み込む
@@ -356,9 +425,18 @@ export function normalizeState(v: unknown): GameState | null {
     duelNo: isInt(s.duelNo, 1, 1_000_000) ? s.duelNo : 1,
     result:
       r && (r.winner === null || isSeat(r.winner)) && Object.hasOwn(REASON_LABEL, r.reason)
-        ? { winner: r.winner, reason: r.reason, at: Number(r.at) || 0 }
+        ? {
+            winner: r.winner,
+            winnerName: r.winner
+              ? typeof r.winnerName === 'string'
+                ? text(r.winnerName, 20)
+                : players[r.winner].name || (r.winner === 'p1' ? 'プレイヤー1' : 'プレイヤー2')
+              : null,
+            reason: r.reason,
+            at: Number(r.at) || 0,
+          }
         : null,
-    record: { p1: count(rec.p1), p2: count(rec.p2), draws: count(rec.draws) },
+    record: { wins, draws: count(rec.draws) },
   };
 }
 

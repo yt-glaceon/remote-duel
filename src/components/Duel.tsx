@@ -1,8 +1,8 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
-import { other, type Action } from '../game/state';
+import { canChangeSeats, displayName, other, SEATS, type Action, type GameState, type Seat } from '../game/state';
 import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl } from '../identity';
-import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient } from '../net/room';
+import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type RoomClient, type View } from '../net/room';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
@@ -22,7 +22,6 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
   });
   const [showPhone, setShowPhone] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showWatchers, setShowWatchers] = useState(false);
   const { state, seat } = view;
   const me = seat ?? 'p1';
   const readOnly = !seat || view.status === 'full';
@@ -34,7 +33,7 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const p2Online = view.members.some((m) => m.role === 'player' && m.seat === 'p2');
+  const seatTaken = (s: Seat) => view.members.some((m) => m.role === 'player' && m.seat === s);
   const watchers = view.members.filter((m) => m.role === 'spectator');
 
   const closeRoom = () => {
@@ -68,13 +67,8 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
         <StatusPill status={view.status} detail={view.detail} />
         {view.detail && <span className="muted small">{view.detail}</span>}
         <span className="spacer" />
-        {isHost && !p2Online && <span className="muted small">相手を待っています →</span>}
-        {watchers.length > 0 &&
-          (isHost ? (
-            <button onClick={() => setShowWatchers(true)}>観戦 {watchers.length}人</button>
-          ) : (
-            <span className="muted small">観戦 {watchers.length}人</span>
-          ))}
+        {isHost && state && !SEATS.every(seatTaken) && <span className="muted small">プレイヤーを待っています →</span>}
+        {watchers.length > 0 && <span className="muted small">観戦 {watchers.length}人</span>}
         <button onClick={() => void copyInvite()}>{copied ? 'コピーしました' : '招待リンクをコピー'}</button>
         {seat && <button onClick={() => setShowPhone(true)}>スマホをカメラにする</button>}
         {isHost && (
@@ -94,6 +88,7 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
             <Snapshots snaps={view.snaps} state={state} />
           </section>
           <aside className="side">
+            <SeatsPanel view={view} client={client} state={state} isHost={isHost} />
             <LpCard state={state} seat={other(me)} isMe={false} me={me} dispatch={dispatch} readOnly={readOnly} />
             <LpCard state={state} seat={me} isMe={!readOnly} me={me} dispatch={dispatch} readOnly={readOnly} />
             <ResultPanel state={state} dispatch={dispatch} readOnly={readOnly} />
@@ -106,30 +101,15 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
         </main>
       )}
 
-      {showWatchers && isHost && (
-        <WatchersModal watchers={watchers} client={client} onClose={() => setShowWatchers(false)} />
-      )}
-      {showPhone && seat && (
-        <PhoneCameraModal room={room} seat={seat} client={client} onClose={() => setShowPhone(false)} />
-      )}
+      {showPhone && seat && <PhoneCameraModal room={room} client={client} onClose={() => setShowPhone(false)} />}
       <Toast notice={view.notice} />
     </div>
   );
 }
 
-function PhoneCameraModal({
-  room,
-  seat,
-  client,
-  onClose,
-}: {
-  room: string;
-  seat: 'p1' | 'p2';
-  client: RoomClient;
-  onClose: () => void;
-}) {
+function PhoneCameraModal({ room, client, onClose }: { room: string; client: RoomClient; onClose: () => void }) {
   const [camKey, setCamKey] = useState(() => getCamKey(room));
-  const url = roomUrl(room, { cam: seat, key: camKey });
+  const url = roomUrl(room, { cam: '1', key: camKey });
   const [qr, setQr] = useState('');
   useEffect(() => {
     void QRCode.toDataURL(url, { width: 260, margin: 1 }).then(setQr);
@@ -139,6 +119,7 @@ function PhoneCameraModal({
     <Modal onClose={onClose}>
       <h2>スマホをカメラにする</h2>
       <p className="muted">スマホでこの QR コードを読み取り、盤面の真上に固定してください。映像は相手に届き、あなたの画面にも小さく表示されます。</p>
+      <p className="muted small">席を移っても、スマホはあなたに付いていきます。観戦に回っている間は、映像を送りません。</p>
       <p className="muted small">このリンクにはあなた専用の合言葉が入っています。ほかの人には送らないでください。</p>
       {qr && <img src={qr} alt="カメラ端末用リンクの QR コード" className="qr" />}
       <input readOnly value={url} onFocus={(e) => e.target.select()} />
@@ -158,36 +139,74 @@ function PhoneCameraModal({
   );
 }
 
-/** ホストが観戦者を確認し、退出させる画面 */
-function WatchersModal({
-  watchers,
-  client,
-  onClose,
-}: {
-  watchers: PublicMember[];
-  client: RoomClient;
-  onClose: () => void;
-}) {
+/**
+ * 席と観戦者の一覧。決着後か開始前なら、自分で席を移ったり観戦に回ったりできる。
+ * デュエル中でも、空いた席(回線が切れた人の席を含む)には観戦者が座れる
+ */
+function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomClient; state: GameState; isHost: boolean }) {
+  const free = canChangeSeats(state);
+  const me = view.seat;
+  const selfId = client.selfPeerId();
+  const watchers = view.members.filter((m) => m.role === 'spectator');
+
+  const sit = (s: Seat, away: boolean) => {
+    if (away && !confirm(`${state.players[s].name}は回線が切れています。代わりにこの席に座りますか?`)) return;
+    client.requestSeat(s);
+  };
+
   return (
-    <Modal onClose={onClose}>
-      <h2>観戦者</h2>
-      <p className="muted small">
-        {watchers.length} / {SPECTATOR_MAX}人。退出させた人も、招待リンクを開き直せばまた入れます。
-      </p>
-      {watchers.length === 0 ? (
-        <p className="muted">いません</p>
-      ) : (
+    <div className="panel seats">
+      <div className="panel-head">
+        <strong>席</strong>
+        <span className="muted small">{free ? '入れ替えできます' : 'デュエル中は入れ替えできません'}</span>
+      </div>
+      {SEATS.map((s) => {
+        const seated = view.members.some((m) => m.role === 'player' && m.seat === s);
+        const away = !seated && !!state.players[s].name;
+        return (
+          <div key={s} className="seat-row">
+            <span className="seat-label">{s === 'p1' ? 'P1' : 'P2'}</span>
+            <span className="seat-name">
+              {seated ? displayName(state, s) : away ? `${state.players[s].name}(切断中)` : <span className="muted">空席</span>}
+              {me === s && <small> (あなた)</small>}
+            </span>
+            {!seated && me !== s && (free || !me) && (
+              <button className="small-btn" onClick={() => sit(s, away)}>
+                {me ? 'ここに移る' : '座る'}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <div className="seat-row">
+        <span className="seat-label">観戦</span>
+        <span className="seat-name muted">
+          {watchers.length} / {SPECTATOR_MAX}人
+        </span>
+        {me && free && (
+          <button className="small-btn" onClick={() => client.requestSeat(null)}>
+            観戦に回る
+          </button>
+        )}
+      </div>
+      {watchers.length > 0 && (
         <ul className="watchers">
           {watchers.map((w) => (
             <li key={w.peerId}>
-              <span>{w.name || '(名前なし)'}</span>
-              <button className="danger small-btn" onClick={() => client.kick(w.peerId)}>
-                退出させる
-              </button>
+              <span>
+                {w.name || '(名前なし)'}
+                {w.peerId === selfId && <small> (あなた)</small>}
+              </span>
+              {isHost && w.peerId !== selfId && (
+                <button className="danger small-btn" onClick={() => client.kick(w.peerId)}>
+                  退出させる
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-    </Modal>
+      {!free && <p className="muted small">決着後か、やり直した後に入れ替えられます。空いた席には、観戦者がいつでも座れます。</p>}
+    </div>
   );
 }

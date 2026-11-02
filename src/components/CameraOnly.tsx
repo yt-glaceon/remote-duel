@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import type { Seat } from '../game/state';
 import { getClientId, loadName } from '../identity';
 import { listCameras, openCamera, stopStream } from '../media/camera';
 import { useRoom } from '../net/useRoom';
@@ -7,12 +6,11 @@ import { StreamVideo } from './ZoomView';
 import { StatusPill, Toast } from './common';
 
 /** スマホなどをカメラ専用の端末としてルームに参加させる画面 */
-export function CameraOnly({ room, seat, camKey }: { room: string; seat: Seat; camKey: string }) {
+export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
   const [view, client] = useRoom({
     room,
     isHost: false,
     role: 'camera',
-    seat,
     name: loadName(),
     clientId: getClientId(),
     camKey,
@@ -50,15 +48,20 @@ export function CameraOnly({ room, seat, camKey }: { room: string; seat: Seat; c
   }, [stream]);
 
   const settings = stream?.getVideoTracks()[0]?.getSettings();
-  const viewers = view.members.filter((m) => m.role === 'player').length;
+  const seat = view.seat;
+  // 持ち主が観戦中のときは送らない
+  const viewers = seat ? view.members.filter((m) => m.role !== 'camera' && m.seat !== seat).length : 0;
 
   return (
     <div className="camera-only">
       <header className="bar">
         <strong>カメラ端末</strong>
-        <span className="muted">ルーム {room} / {seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像</span>
+        <span className="muted">
+          ルーム {room} / {seat ? `${seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像` : '持ち主は観戦中'}
+        </span>
         <StatusPill status={view.status} detail={view.detail} />
       </header>
+      {view.detail && <p className="muted small">{view.detail}</p>}
       {stream ? (
         <>
           <StreamVideo stream={stream} className="cam-preview" />

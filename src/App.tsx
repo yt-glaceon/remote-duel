@@ -7,8 +7,9 @@ export function App() {
   const params = new URLSearchParams(location.search);
   const room = params.get('room')?.toLowerCase() ?? '';
   if (!ROOM_RE.test(room)) return <Lobby />;
+  // カメラ端末は合言葉で持ち主に結び付く(席は持ち主に付いていく)。cam=p1/p2 は以前のリンクの形
   const cam = params.get('cam');
-  if (cam === 'p1' || cam === 'p2') return <CameraOnly room={room} seat={cam} camKey={params.get('key') ?? ''} />;
+  if (cam === '1' || cam === 'p1' || cam === 'p2') return <CameraOnly room={room} camKey={params.get('key') ?? ''} />;
   const isHost = params.get('host') === '1';
   const as = params.get('as');
   // 招待リンクで来た人には、まず対戦するか観戦するかを選んでもらう
