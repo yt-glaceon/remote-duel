@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { getClientId, loadName } from '../identity';
-import { listCameras, openCamera, stopStream } from '../media/camera';
+import { getClientId, loadCamRotate, loadName, saveCamRotate } from '../identity';
+import { listCameras, nextRotation, openCamera, stopStream, toRotation } from '../media/camera';
 import { useRoom } from '../net/useRoom';
-import { StreamVideo } from './ZoomView';
+import { Rotated, StreamVideo } from './ZoomView';
 import { StatusPill, Toast } from './common';
 
 /** スマホなどをカメラ専用の端末としてルームに参加させる画面 */
 export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
+  // 映像の向きは端末ごとに覚えておき、接続したらホストへ伝える
+  const [rotate, setRotate] = useState(() => toRotation(loadCamRotate()));
   const [view, client] = useRoom({
     room,
     isHost: false,
@@ -14,10 +16,12 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
     name: loadName(),
     clientId: getClientId(),
     camKey,
+    rotate,
   });
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
+  const [fullscreen, setFullscreen] = useState(() => !!document.fullscreenElement);
   const stream = view.localStream;
 
   const start = async (id?: string) => {
@@ -33,6 +37,37 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
     }
   };
 
+  const turn = () => {
+    const r = nextRotation(rotate);
+    setRotate(r);
+    saveCamRotate(r);
+    client.setRotate(r);
+  };
+
+  // 全画面にして横向きに固定する。iPhone など固定できない端末では、手で横に持ってもらう
+  const toggleLandscape = async () => {
+    setError('');
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+      return;
+    }
+    try {
+      await document.documentElement.requestFullscreen();
+      await (screen.orientation as ScreenOrientation & { lock(o: string): Promise<void> }).lock('landscape');
+    } catch {
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      setError(
+        'この端末では画面を横向きに固定できません。端末の画面の回転ロックを外して横に持つか、「映像を回す」で向きを合わせてください。',
+      );
+    }
+  };
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
   // 盤面の真上に置いている間、画面が消えないようにする
   useEffect(() => {
     if (!stream || !('wakeLock' in navigator)) return;
@@ -47,6 +82,8 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
     };
   }, [stream]);
 
+  // iPhone の Safari は、ページの全画面表示と向きの固定に対応していない
+  const canFullscreen = typeof document.documentElement.requestFullscreen === 'function';
   const settings = stream?.getVideoTracks()[0]?.getSettings();
   const seat = view.seat;
   // 持ち主が観戦中のときは送らない
@@ -54,47 +91,65 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
 
   return (
     <div className="camera-only">
-      <header className="bar">
-        <strong>カメラ端末</strong>
-        <span className="muted">
-          ルーム {room} / {seat ? `${seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像` : '持ち主は観戦中'}
-        </span>
-        <StatusPill status={view.status} detail={view.detail} />
-      </header>
-      {view.detail && <p className="muted small">{view.detail}</p>}
-      {stream ? (
-        <>
-          <StreamVideo stream={stream} className="cam-preview" />
-          <p className="muted">
-            送信中 {settings?.width}×{settings?.height} ・ 視聴者 {viewers} 人
-          </p>
-          {devices.length > 1 && (
-            <select value={deviceId} onChange={(e) => void start(e.target.value)}>
-              {devices.map((d, i) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `カメラ ${i + 1}`}
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            onClick={() => {
-              stopStream(stream);
-              client.setLocalStream(null, '');
-            }}
-          >
-            カメラを止める
-          </button>
-        </>
-      ) : (
-        <div className="card">
-          <p>このスマホを盤面の真上に固定して、カメラを開始してください。</p>
-          <button className="primary" onClick={() => void start()}>
-            カメラを開始
-          </button>
+      <div className="cam-side">
+        <header className="bar">
+          <strong>カメラ端末</strong>
+          <span className="muted">
+            ルーム {room} / {seat ? `${seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像` : '持ち主は観戦中'}
+          </span>
+          <StatusPill status={view.status} detail={view.detail} />
+        </header>
+        {view.detail && <p className="muted small cam-detail">{view.detail}</p>}
+        {stream ? (
+          <>
+            <p className="muted">
+              送信中 {settings?.width}×{settings?.height} ・ 視聴者 {viewers} 人
+            </p>
+            <p className="muted small">映像は、相手の画面に映るのと同じ向きで表示しています。</p>
+            <div className="cam-actions">
+              <button onClick={turn}>↻ 映像を回す({rotate}°)</button>
+              {canFullscreen && (
+                <button onClick={() => void toggleLandscape()}>{fullscreen ? '全画面をやめる' : '横画面にする'}</button>
+              )}
+            </div>
+            {!canFullscreen && (
+              <p className="muted small">この画面を横向きで見るときは、端末の画面の回転ロックを外して横に持ってください。</p>
+            )}
+            {devices.length > 1 && (
+              <select value={deviceId} onChange={(e) => void start(e.target.value)}>
+                {devices.map((d, i) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `カメラ ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={() => {
+                stopStream(stream);
+                client.setLocalStream(null, '');
+              }}
+            >
+              カメラを止める
+            </button>
+          </>
+        ) : (
+          <div className="card">
+            <p>このスマホを盤面の真上に固定して、カメラを開始してください。</p>
+            <button className="primary" onClick={() => void start()}>
+              カメラを開始
+            </button>
+          </div>
+        )}
+        {error && <p className="error">{error}</p>}
+      </div>
+      {stream && (
+        <div className="cam-stage">
+          <Rotated rotate={rotate}>
+            <StreamVideo stream={stream} className="video-fit" />
+          </Rotated>
         </div>
       )}
-      {error && <p className="error">{error}</p>}
       <Toast notice={view.notice} />
     </div>
   );

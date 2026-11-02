@@ -57,6 +57,10 @@ function randomToken(): string {
 export const loadName = () => safeGet(localStorage, 'ygord-name') ?? '';
 export const saveName = (name: string) => safeSet(localStorage, 'ygord-name', name);
 
+/** カメラ端末の映像の向き。端末の置き方は部屋が替わっても同じことが多いので、端末ごとに覚える */
+export const loadCamRotate = () => Number(safeGet(localStorage, 'ygord-cam-rotate') ?? 0);
+export const saveCamRotate = (r: number) => safeSet(localStorage, 'ygord-cam-rotate', String(r));
+
 export function newRoomId(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
   // 推測されにくいよう 10 文字(約 49 ビット)にする

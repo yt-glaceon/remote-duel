@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { Rotation } from '../media/camera';
 
 type T = { s: number; x: number; y: number };
 const IDENTITY: T = { s: 1, x: 0, y: 0 };
@@ -97,6 +98,15 @@ export function ZoomView({ children, className = '' }: { children: ReactNode; cl
         <button type="button" onClick={() => zoomCenter(1 / 1.5)} aria-label="縮小">－</button>
         <button type="button" onClick={() => setT(IDENTITY)} aria-label="元の大きさ">{t.s.toFixed(1)}×</button>
       </div>
+    </div>
+  );
+}
+
+/** 中身を枠いっぱいに収めたまま、時計回りに回して表示する(90°・270°では縦横を入れ替える) */
+export function Rotated({ rotate, className = '', children }: { rotate: Rotation; className?: string; children: ReactNode }) {
+  return (
+    <div className={`rot rot-${rotate} ${className}`}>
+      <div className="rot-body">{children}</div>
     </div>
   );
 }

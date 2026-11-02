@@ -19,7 +19,7 @@ import {
   type GameState,
   type Seat,
 } from '../game/state';
-import { captureStill, tuneSenders } from '../media/camera';
+import { captureStill, toRotation, tuneSenders, type Rotation } from '../media/camera';
 
 const PEER_PREFIX = 'ygord-v1-';
 export const hostPeerId = (room: string) => PEER_PREFIX + room;
@@ -32,11 +32,19 @@ export const ROOM_CLOSED_TEXT = 'ホストが部屋を閉じました';
  * ホストが持つ参加者の情報。席は持たず、状態の players[seat].clientId から引く。
  * カメラ端末は持ち主(合言葉を作った人)の clientId を owner に持ち、持ち主の席の映像として扱う
  */
-type Member = { peerId: string; clientId: string; camera: boolean; owner: string | null; name: string };
+type Member = { peerId: string; clientId: string; camera: boolean; owner: string | null; name: string; rotate: Rotation };
 /** 他の端末に配る参加者情報。席の取り戻しに使う clientId は含めない */
-export type PublicMember = { peerId: string; role: Role; seat: Seat | null; name: string; host?: boolean };
-export type RemoteCam = { peerId: string; seat: Seat | null; label: string; stream: MediaStream };
-export type Snap = { id: string; seat: Seat | null; label: string; url: string; at: number };
+export type PublicMember = {
+  peerId: string;
+  role: Role;
+  seat: Seat | null;
+  name: string;
+  host?: boolean;
+  /** カメラ端末が決めた映像の向き。見る側で回して表示する */
+  rotate?: Rotation;
+};
+export type RemoteCam = { peerId: string; seat: Seat | null; label: string; rotate: Rotation; stream: MediaStream };
+export type Snap = { id: string; seat: Seat | null; label: string; rotate: Rotation; url: string; at: number };
 export type Status = 'connecting' | 'online' | 'reconnecting' | 'full' | 'error' | 'closed';
 
 export type View = {
@@ -62,6 +70,8 @@ export type RoomOptions = {
   clientId: string;
   /** カメラ端末用リンクの合言葉。プレイヤーは自分の分を、カメラ端末はリンクで受け取った分を送る */
   camKey: string;
+  /** カメラ端末が送る映像の向き */
+  rotate?: Rotation;
 };
 
 type RoomMsg =
@@ -79,7 +89,9 @@ type RoomMsg =
   /** ホストに退出させられた */
   | { t: 'kicked' }
   /** プレイヤーがカメラ用の合言葉を作り直した */
-  | { t: 'camKey'; camKey: string };
+  | { t: 'camKey'; camKey: string }
+  /** カメラ端末が映像の向きを変えた */
+  | { t: 'rotate'; rotate: Rotation };
 
 type CamMsg =
   | { t: 'snapReq'; reqId: string }
@@ -120,6 +132,7 @@ export class RoomClient {
   private restartTimer: ReturnType<typeof setTimeout> | undefined;
   private connectTimer: ReturnType<typeof setTimeout> | undefined;
   private camLabel = 'カメラ';
+  private camRotate: Rotation;
   private camKey: string;
   private closed = false;
 
@@ -142,6 +155,7 @@ export class RoomClient {
 
   constructor(private o: RoomOptions) {
     this.camKey = o.camKey;
+    this.camRotate = toRotation(o.rotate);
     this.hostName = o.name;
     this.view = {
       status: 'connecting',
@@ -346,6 +360,9 @@ export class RoomClient {
           this.hostConn?.close();
           return;
         }
+        if (this.o.role === 'camera' && this.camRotate && this.hostConn) {
+          this.send(this.hostConn, { t: 'rotate', rotate: this.camRotate });
+        }
         this.set({
           seat: msg.seat,
           status: this.o.role === 'camera' || msg.seat ? 'online' : 'full',
@@ -440,7 +457,7 @@ export class RoomClient {
           setTimeout(() => conn.close(), 500);
           return;
         }
-        this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: true, owner, name });
+        this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: true, owner, name, rotate: 0 });
         this.roomConns.set(conn.peer, conn);
         this.send(conn, { t: 'welcome', seat: seatOf(st, owner), full: false });
         this.publishMembers();
@@ -455,7 +472,7 @@ export class RoomClient {
         setTimeout(() => conn.close(), 500);
         return;
       }
-      this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: false, owner: null, name });
+      this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: false, owner: null, name, rotate: 0 });
       this.roomConns.set(conn.peer, conn);
       if (msg.camKey) this.camKeys.set(msg.clientId, msg.camKey);
       if (seat && !seatOf(st, msg.clientId)) this.takeSeat(st, msg.clientId, name, seat);
@@ -474,6 +491,14 @@ export class RoomClient {
       const m = this.memberMap.get(conn.peer);
       if (m && !m.camera && typeof msg.camKey === 'string' && msg.camKey && msg.camKey.length <= 64) {
         this.applyCamKey(m.clientId, msg.camKey);
+      }
+    } else if (msg.t === 'rotate') {
+      // 向きを変えられるのはカメラ端末だけ。値は 0・90・180・270 に限る
+      const m = this.memberMap.get(conn.peer);
+      const rotate = toRotation(msg.rotate);
+      if (m?.camera && rotate !== m.rotate) {
+        m.rotate = rotate;
+        this.publishMembers();
       }
     } else if (msg.t === 'intent') {
       const m = this.memberMap.get(conn.peer);
@@ -542,6 +567,12 @@ export class RoomClient {
   }
 
   /** 自分の席を移る(null なら観戦に回る) */
+  /** カメラ端末から、送っている映像の向きを伝える */
+  setRotate(rotate: Rotation) {
+    this.camRotate = rotate;
+    if (this.hostConn) this.send(this.hostConn, { t: 'rotate', rotate });
+  }
+
   requestSeat(to: Seat | null) {
     if (this.o.isHost) {
       const problem = this.changeSeat(this.o.clientId, this.hostName, to);
@@ -638,7 +669,8 @@ export class RoomClient {
     };
     const others = [...this.memberMap.values()].map((m): PublicMember => {
       const seat = seatOf(st, m.camera ? m.owner : m.clientId);
-      return { peerId: m.peerId, role: m.camera ? 'camera' : seat ? 'player' : 'spectator', seat, name: m.name };
+      if (m.camera) return { peerId: m.peerId, role: 'camera', seat, name: m.name, rotate: m.rotate };
+      return { peerId: m.peerId, role: seat ? 'player' : 'spectator', seat, name: m.name };
     });
     const members = [self, ...others];
     for (const conn of this.roomConns.values()) this.send(conn, { t: 'members', members });
@@ -647,8 +679,9 @@ export class RoomClient {
 
   /** 映像の席は送信者の自己申告を信じず、ホストが割り当てた参加者一覧から引く。自分の席もここで追う */
   private setMembers(members: PublicMember[]) {
-    const seatOfPeer = (peerId: string) => members.find((m) => m.peerId === peerId)?.seat ?? null;
-    const patch: Partial<View> = { members, cams: this.view.cams.map((c) => ({ ...c, seat: seatOfPeer(c.peerId) })) };
+    const of = (peerId: string) => members.find((m) => m.peerId === peerId);
+    const cams = this.view.cams.map((c) => ({ ...c, seat: of(c.peerId)?.seat ?? null, rotate: toRotation(of(c.peerId)?.rotate) }));
+    const patch: Partial<View> = { members, cams };
     const me = members.find((m) => m.peerId === this.peer?.id);
     if (me && me.seat !== this.view.seat) {
       patch.seat = isSeat(me.seat) ? me.seat : null;
@@ -749,9 +782,9 @@ export class RoomClient {
     call.answer();
     call.on('stream', (stream) => {
       if (this.inCalls.get(call.peer) !== call) return;
-      const seat = this.view.members.find((m) => m.peerId === call.peer)?.seat ?? null;
+      const member = this.view.members.find((m) => m.peerId === call.peer);
       const label = typeof md.label === 'string' && md.label ? md.label.slice(0, 20) : 'カメラ';
-      const cam: RemoteCam = { peerId: call.peer, seat, label, stream };
+      const cam: RemoteCam = { peerId: call.peer, seat: member?.seat ?? null, label, rotate: toRotation(member?.rotate), stream };
       this.set({ cams: [...this.view.cams.filter((c) => c.peerId !== call.peer), cam] });
     });
     const remove = () => {
@@ -811,7 +844,14 @@ export class RoomClient {
     }
     const cam = this.view.cams.find((c) => c.peerId === conn.peer);
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: msg.mime }));
-    const snap: Snap = { id: msg.reqId, seat: cam?.seat ?? null, label: cam?.label ?? 'カメラ', url, at: Date.now() };
+    const snap: Snap = {
+      id: msg.reqId,
+      seat: cam?.seat ?? null,
+      label: cam?.label ?? 'カメラ',
+      rotate: cam?.rotate ?? 0,
+      url,
+      at: Date.now(),
+    };
     const snaps = [snap, ...this.view.snaps];
     snaps.slice(20).forEach((s) => URL.revokeObjectURL(s.url));
     this.set({ snaps: snaps.slice(0, 20) });

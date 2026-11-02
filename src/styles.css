@@ -260,8 +260,13 @@ input {
   gap: 6px;
   overflow-x: auto;
 }
-.snaps img {
+.snap-thumb {
+  flex: none;
+  width: 120px;
   height: 80px;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
   border-radius: 6px;
   cursor: zoom-in;
 }
@@ -435,11 +440,6 @@ input {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-.cam-preview {
-  width: 100%;
-  background: #000;
-  border-radius: 10px;
 }
 
 /* モーダル・通知 */
@@ -656,4 +656,87 @@ input {
 }
 .clickable {
   cursor: zoom-in;
+}
+
+/* 映像の回転。枠の大きさをコンテナ単位で測り、90°・270°では縦横を入れ替えてから回す */
+.rot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  container-type: size;
+}
+.rot > .rot-body {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100cqw;
+  height: 100cqh;
+  transform: translate(-50%, -50%);
+}
+.rot-90 > .rot-body,
+.rot-270 > .rot-body {
+  width: 100cqh;
+  height: 100cqw;
+}
+.rot-90 > .rot-body {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.rot-180 > .rot-body {
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+.rot-270 > .rot-body {
+  transform: translate(-50%, -50%) rotate(270deg);
+}
+.rot.thumb-video {
+  height: auto;
+}
+
+/* カメラ端末。縦画面では見出しの下に映像、横画面では映像を左いっぱいに置き、操作を右に並べる */
+.cam-side {
+  display: contents;
+}
+.cam-side > * {
+  order: 2;
+}
+.cam-side > .bar,
+.cam-side > .cam-detail {
+  order: 0;
+}
+.cam-stage {
+  order: 1;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cam-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (orientation: landscape) and (max-height: 600px) {
+  .camera-only {
+    flex-direction: row;
+    align-items: flex-start;
+    max-width: none;
+    padding: 8px;
+  }
+  .cam-stage {
+    order: 0;
+    flex: 1;
+    width: auto;
+    height: calc(100vh - 16px);
+    aspect-ratio: auto;
+  }
+  .cam-side {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    order: 1;
+    width: 240px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+  }
 }

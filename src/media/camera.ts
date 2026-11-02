@@ -2,6 +2,11 @@
 
 export const TEST_PATTERN_ID = 'test-pattern';
 
+/** 映像の向き(時計回りの角度) */
+export type Rotation = 0 | 90 | 180 | 270;
+export const toRotation = (v: unknown): Rotation => (v === 90 || v === 180 || v === 270 ? v : 0);
+export const nextRotation = (r: Rotation): Rotation => toRotation((r + 90) % 360);
+
 export async function listCameras(): Promise<MediaDeviceInfo[]> {
   if (!navigator.mediaDevices?.enumerateDevices) return [];
   const devices = await navigator.mediaDevices.enumerateDevices();

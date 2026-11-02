@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { displayName, type GameState, type Seat } from '../game/state';
-import { listCameras, openCamera, stopStream, TEST_PATTERN_ID } from '../media/camera';
+import { listCameras, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
-import { StreamVideo, ZoomView } from './ZoomView';
+import { Rotated, StreamVideo, ZoomView } from './ZoomView';
 
 /** 見たい席(プレイヤーなら相手、観戦者なら両方)の映像を大きく表示する。複数あればタブで切り替える */
 export function OpponentCams({
@@ -42,7 +42,9 @@ export function OpponentCams({
         <>
           <div className="video-wrap">
             <ZoomView className="video-box">
-              <StreamVideo stream={cam.stream} className="video-fit" />
+              <Rotated rotate={cam.rotate}>
+                <StreamVideo stream={cam.stream} className="video-fit" />
+              </Rotated>
             </ZoomView>
             {me && <SelfPip feeds={selfFeeds(view, me)} />}
           </div>
@@ -126,7 +128,9 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
       <div className="thumbs">
         {selfFeeds(view, me).map((f) => (
           <figure key={f.id} className="clickable" onClick={() => setOpen(f)} title="クリックで大きく表示">
-            <StreamVideo stream={f.stream} className="thumb-video" />
+            <Rotated rotate={f.rotate} className="thumb-video">
+              <StreamVideo stream={f.stream} className="video-fit" />
+            </Rotated>
             <figcaption className="muted small">{f.label}</figcaption>
           </figure>
         ))}
@@ -136,13 +140,13 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
   );
 }
 
-type SelfFeed = { id: string; label: string; stream: MediaStream };
+type SelfFeed = { id: string; label: string; rotate: Rotation; stream: MediaStream };
 
 /** 自分が相手に送っている映像(この PC のカメラと、自分の席のスマホカメラ) */
 export function selfFeeds(view: View, me: Seat): SelfFeed[] {
   const feeds: SelfFeed[] = [];
-  if (view.localStream) feeds.push({ id: 'local', label: 'この PC のカメラ', stream: view.localStream });
-  for (const c of view.cams) if (c.seat === me) feeds.push({ id: c.peerId, label: c.label, stream: c.stream });
+  if (view.localStream) feeds.push({ id: 'local', label: 'この PC のカメラ', rotate: 0, stream: view.localStream });
+  for (const c of view.cams) if (c.seat === me) feeds.push({ id: c.peerId, label: c.label, rotate: c.rotate, stream: c.stream });
   return feeds;
 }
 
@@ -151,7 +155,9 @@ function FeedModal({ feed, onClose }: { feed: SelfFeed; onClose: () => void }) {
     <Modal wide onClose={onClose}>
       <h2>あなたのカメラ({feed.label})</h2>
       <ZoomView className="snap-box">
-        <StreamVideo stream={feed.stream} className="video-fit" />
+        <Rotated rotate={feed.rotate}>
+          <StreamVideo stream={feed.stream} className="video-fit" />
+        </Rotated>
       </ZoomView>
       <p className="muted small">相手に送っている映像です。盤面が映っているか、文字が読めるかを確かめられます。</p>
     </Modal>
@@ -167,7 +173,9 @@ function SelfPip({ feeds }: { feeds: SelfFeed[] }) {
       <div className="self-pip" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
         {feeds.map((f) => (
           <button key={f.id} className="self-pip-item" onClick={() => setOpen(f)} title="クリックで大きく表示">
-            <StreamVideo stream={f.stream} className="video-fit" />
+            <Rotated rotate={f.rotate}>
+              <StreamVideo stream={f.stream} className="video-fit" />
+            </Rotated>
             <span className="self-pip-label">自分・{f.label}</span>
           </button>
         ))}
@@ -188,13 +196,19 @@ export function Snapshots({ snaps, state }: { snaps: Snap[]; state: GameState })
       </div>
       <div className="snaps">
         {snaps.map((s) => (
-          <img key={s.id} src={s.url} alt="スナップショット" onClick={() => setOpen(s)} />
+          <button key={s.id} className="snap-thumb" onClick={() => setOpen(s)} title="クリックで拡大">
+            <Rotated rotate={s.rotate}>
+              <img src={s.url} className="video-fit" alt="スナップショット" />
+            </Rotated>
+          </button>
         ))}
       </div>
       {open && (
         <Modal wide onClose={() => setOpen(null)}>
           <ZoomView className="snap-box">
-            <img src={open.url} className="video-fit" alt="スナップショット" draggable={false} />
+            <Rotated rotate={open.rotate}>
+              <img src={open.url} className="video-fit" alt="スナップショット" draggable={false} />
+            </Rotated>
           </ZoomView>
           <div className="row">
             <span className="muted small">
