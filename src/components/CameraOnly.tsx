@@ -24,18 +24,38 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
   const [fullscreen, setFullscreen] = useState(() => !!document.fullscreenElement);
   const stream = view.localStream;
 
-  const start = async (id?: string) => {
+  const [facing, setFacing] = useState<'environment' | 'user'>('environment');
+
+  const start = async (id?: string, face: 'environment' | 'user' = facing) => {
     setError('');
-    try {
-      const s = await openCamera(id || undefined, 'environment');
-      stopStream(client.getView().localStream);
+    // Android はカメラを2台同時に開けないので、今のカメラを先に止めてから開く
+    const prevId = deviceId;
+    const prev = client.getView().localStream;
+    if (prev) {
+      stopStream(prev);
+      client.setLocalStream(null, '');
+    }
+    const open = async (devId: string | undefined, f: 'environment' | 'user') => {
+      const s = await openCamera(devId, f);
       client.setLocalStream(s, 'スマホカメラ');
       setDevices(await listCameras());
-      setDeviceId(s.getVideoTracks()[0]?.getSettings().deviceId ?? '');
+      const settings = s.getVideoTracks()[0]?.getSettings();
+      setDeviceId(settings?.deviceId ?? '');
+      if (settings?.facingMode === 'user' || settings?.facingMode === 'environment') setFacing(settings.facingMode);
+      else setFacing(f);
+    };
+    try {
+      await open(id || undefined, face);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`このカメラは開けませんでした(${msg})。`);
+      // 切り替えに失敗したら、元のカメラに戻す
+      if (prev) await open(prevId || undefined, facing).catch(() => {});
     }
   };
+
+  // インカメと外カメの切り替え。端末によってはカメラの一覧に出ないので、向きで指定して開く
+  const flip = () => void start(undefined, facing === 'environment' ? 'user' : 'environment');
 
   const turn = () => {
     const r = nextRotation(rotate);
@@ -108,6 +128,7 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
             <p className="muted small">映像は、相手の画面に映るのと同じ向きで表示しています。</p>
             <div className="cam-actions">
               <button onClick={turn}>↻ 映像を回す({rotate}°)</button>
+              <button onClick={flip}>{facing === 'environment' ? 'インカメにする' : '外カメにする'}</button>
               {canFullscreen && (
                 <button onClick={() => void toggleLandscape()}>{fullscreen ? '全画面をやめる' : '横画面にする'}</button>
               )}
@@ -124,6 +145,7 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
                 ))}
               </select>
             )}
+            <p className="muted small">広角や望遠のカメラは、端末がブラウザに見せている場合だけ上の一覧に出ます。</p>
             <button
               onClick={() => {
                 stopStream(stream);
