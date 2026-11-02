@@ -2,26 +2,27 @@ import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { other, type Action } from '../game/state';
 import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl } from '../identity';
-import type { RoomClient } from '../net/room';
+import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient } from '../net/room';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
 import { ResultPanel } from './ResultPanel';
 import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
 
-export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
+export function Duel({ room, isHost, spectator }: { room: string; isHost: boolean; spectator: boolean }) {
   // 合言葉は最初の1回だけ読む(描画のたびに読むと、部屋を閉じて消した直後に作り直してしまう)
   const [camKey] = useState(() => getCamKey(room));
   const [view, client] = useRoom({
     room,
     isHost,
-    role: 'player',
+    role: spectator ? 'spectator' : 'player',
     name: loadName(),
     clientId: getClientId(),
     camKey,
   });
   const [showPhone, setShowPhone] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showWatchers, setShowWatchers] = useState(false);
   const { state, seat } = view;
   const me = seat ?? 'p1';
   const readOnly = !seat || view.status === 'full';
@@ -34,6 +35,7 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
   };
 
   const p2Online = view.members.some((m) => m.role === 'player' && m.seat === 'p2');
+  const watchers = view.members.filter((m) => m.role === 'spectator');
 
   const closeRoom = () => {
     if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
@@ -47,7 +49,9 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
       <div className="app">
         <div className="center">
           <p>{view.detail}</p>
-          <p className="muted small">この部屋の招待リンクは、もう使わないでください。</p>
+          {(isHost || view.detail === ROOM_CLOSED_TEXT) && (
+            <p className="muted small">この部屋の招待リンクは、もう使わないでください。</p>
+          )}
           <button className="primary" onClick={() => (location.search = '')}>
             最初の画面へ
           </button>
@@ -65,6 +69,12 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
         {view.detail && <span className="muted small">{view.detail}</span>}
         <span className="spacer" />
         {isHost && !p2Online && <span className="muted small">相手を待っています →</span>}
+        {watchers.length > 0 &&
+          (isHost ? (
+            <button onClick={() => setShowWatchers(true)}>観戦 {watchers.length}人</button>
+          ) : (
+            <span className="muted small">観戦 {watchers.length}人</span>
+          ))}
         <button onClick={() => void copyInvite()}>{copied ? 'コピーしました' : '招待リンクをコピー'}</button>
         {seat && <button onClick={() => setShowPhone(true)}>スマホをカメラにする</button>}
         {isHost && (
@@ -79,7 +89,8 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
       ) : (
         <main className="duel">
           <section className="stage">
-            <OpponentCams view={view} client={client} me={me} state={state} />
+            {/* 観戦者は両方のプレイヤーの映像を見る */}
+            <OpponentCams view={view} client={client} seats={seat ? [other(me)] : ['p1', 'p2']} me={seat} state={state} />
             <Snapshots snaps={view.snaps} state={state} />
           </section>
           <aside className="side">
@@ -95,6 +106,9 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
         </main>
       )}
 
+      {showWatchers && isHost && (
+        <WatchersModal watchers={watchers} client={client} onClose={() => setShowWatchers(false)} />
+      )}
       {showPhone && seat && (
         <PhoneCameraModal room={room} seat={seat} client={client} onClose={() => setShowPhone(false)} />
       )}
@@ -140,6 +154,40 @@ function PhoneCameraModal({
       </button>
       <p className="muted small">リンクを他の人に知られたときや、カメラ端末を替えたいときに使います。</p>
       {insecure && <p className="error small">いまは HTTPS ではないため、スマホのカメラは使えません。公開した URL か `npm run dev:lan` で開いてください。</p>}
+    </Modal>
+  );
+}
+
+/** ホストが観戦者を確認し、退出させる画面 */
+function WatchersModal({
+  watchers,
+  client,
+  onClose,
+}: {
+  watchers: PublicMember[];
+  client: RoomClient;
+  onClose: () => void;
+}) {
+  return (
+    <Modal onClose={onClose}>
+      <h2>観戦者</h2>
+      <p className="muted small">
+        {watchers.length} / {SPECTATOR_MAX}人。退出させた人も、招待リンクを開き直せばまた入れます。
+      </p>
+      {watchers.length === 0 ? (
+        <p className="muted">いません</p>
+      ) : (
+        <ul className="watchers">
+          {watchers.map((w) => (
+            <li key={w.peerId}>
+              <span>{w.name || '(名前なし)'}</span>
+              <button className="danger small-btn" onClick={() => client.kick(w.peerId)}>
+                退出させる
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Modal>
   );
 }

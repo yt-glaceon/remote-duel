@@ -1,6 +1,37 @@
 import { useState } from 'react';
 import { loadName, newRoomId, ROOM_RE, saveName } from '../identity';
 
+/** 招待リンクを開いた人が、対戦するか観戦するかを選ぶ画面 */
+export function JoinChoice({ room }: { room: string }) {
+  const [name, setName] = useState(loadName());
+  const join = (as: 'play' | 'watch') => {
+    saveName(name.trim());
+    location.search = new URLSearchParams({ room, as }).toString();
+  };
+  return (
+    <div className="lobby">
+      <h1>リモートデュエル</h1>
+      <p className="muted">ルーム {room} に招待されています。</p>
+      <label className="field">
+        <span>あなたの名前</span>
+        <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="例: たろう" />
+      </label>
+      <div className="card">
+        <h2>対戦する</h2>
+        <p className="muted">対戦相手として参加します。席が埋まっているときは観戦になります。</p>
+        <button className="primary" onClick={() => join('play')}>
+          対戦する
+        </button>
+      </div>
+      <div className="card">
+        <h2>観戦する</h2>
+        <p className="muted">LP やカメラ映像を見るだけで、操作はしません(観戦は4人まで)。</p>
+        <button onClick={() => join('watch')}>観戦する</button>
+      </div>
+    </div>
+  );
+}
+
 export function Lobby() {
   const [name, setName] = useState(loadName());
   const [code, setCode] = useState('');

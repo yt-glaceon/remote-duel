@@ -559,3 +559,63 @@ input {
 .result-banner.win-p2 {
   border-left: 4px solid var(--p2);
 }
+.watchers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.watchers li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.video-wrap {
+  position: relative;
+}
+/* 自分のカメラの小窓。相手の映像の右上に重ねる */
+.self-pip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+.self-pip-item {
+  position: relative;
+  width: 168px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+  border: 2px solid var(--p1);
+  border-radius: 6px;
+  cursor: zoom-in;
+  opacity: 0.92;
+}
+.self-pip-item:hover {
+  opacity: 1;
+}
+.self-pip-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-size: 11px;
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.6);
+  text-align: left;
+}
+@media (max-width: 600px) {
+  .self-pip-item {
+    width: 104px;
+  }
+}
+.clickable {
+  cursor: zoom-in;
+}

@@ -1,16 +1,30 @@
 import { useEffect, useState } from 'react';
-import { displayName, other, type GameState, type Seat } from '../game/state';
+import { displayName, type GameState, type Seat } from '../game/state';
 import { listCameras, openCamera, stopStream, TEST_PATTERN_ID } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
 import { StreamVideo, ZoomView } from './ZoomView';
 
-/** 相手の映像(複数あればタブで切り替え)を大きく表示する */
-export function OpponentCams({ view, client, me, state }: { view: View; client: RoomClient; me: Seat; state: GameState }) {
-  // 席が確定していない映像は、相手のものとして扱わない
-  const cams = view.cams.filter((c) => c.seat === other(me));
+/** 見たい席(プレイヤーなら相手、観戦者なら両方)の映像を大きく表示する。複数あればタブで切り替える */
+export function OpponentCams({
+  view,
+  client,
+  seats,
+  me,
+  state,
+}: {
+  view: View;
+  client: RoomClient;
+  seats: Seat[];
+  /** プレイヤーなら自分の席。自分のカメラを隅に小さく出す。観戦者は null */
+  me: Seat | null;
+  state: GameState;
+}) {
+  // 席が確定していない映像は表示しない
+  const cams = view.cams.filter((c) => c.seat && seats.includes(c.seat));
   const [selected, setSelected] = useState<string | null>(null);
   const cam = cams.find((c) => c.peerId === selected) ?? cams[0];
+  const watching = seats.length > 1;
 
   return (
     <div className="stage-main">
@@ -18,6 +32,7 @@ export function OpponentCams({ view, client, me, state }: { view: View; client: 
         <div className="tabs">
           {cams.map((c) => (
             <button key={c.peerId} className={c === cam ? 'active' : ''} onClick={() => setSelected(c.peerId)}>
+              {watching && c.seat ? `${displayName(state, c.seat)}の` : ''}
               {c.label}
             </button>
           ))}
@@ -25,9 +40,12 @@ export function OpponentCams({ view, client, me, state }: { view: View; client: 
       )}
       {cam ? (
         <>
-          <ZoomView className="video-box">
-            <StreamVideo stream={cam.stream} className="video-fit" />
-          </ZoomView>
+          <div className="video-wrap">
+            <ZoomView className="video-box">
+              <StreamVideo stream={cam.stream} className="video-fit" />
+            </ZoomView>
+            {me && <SelfPip feeds={selfFeeds(view, me)} />}
+          </div>
           <div className="row stage-tools">
             <span className="muted small">
               {cam.seat ? displayName(state, cam.seat) : '相手'}の{cam.label}
@@ -39,9 +57,14 @@ export function OpponentCams({ view, client, me, state }: { view: View; client: 
           </div>
         </>
       ) : (
-        <div className="video-box placeholder">
-          <p>相手のカメラ映像はまだ届いていません</p>
-          <p className="muted small">相手がカメラを開始すると、ここに表示されます</p>
+        <div className="video-wrap">
+          <div className="video-box placeholder">
+            <p>{watching ? 'カメラ映像はまだ届いていません' : '相手のカメラ映像はまだ届いていません'}</p>
+            <p className="muted small">
+              {watching ? 'プレイヤーがカメラを開始すると、ここに表示されます' : '相手がカメラを開始すると、ここに表示されます'}
+            </p>
+          </div>
+          {me && <SelfPip feeds={selfFeeds(view, me)} />}
         </div>
       )}
     </div>
@@ -53,8 +76,8 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
+  const [open, setOpen] = useState<SelfFeed | null>(null);
   const stream = view.localStream;
-  const phoneCams = view.cams.filter((c) => c.seat === me);
 
   useEffect(() => {
     void listCameras().then(setDevices).catch(() => {});
@@ -101,15 +124,56 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
       </select>
       {error && <p className="error small">{error}</p>}
       <div className="thumbs">
-        {stream && <StreamVideo stream={stream} className="thumb-video" />}
-        {phoneCams.map((c) => (
-          <figure key={c.peerId}>
-            <StreamVideo stream={c.stream} className="thumb-video" />
-            <figcaption className="muted small">{c.label}</figcaption>
+        {selfFeeds(view, me).map((f) => (
+          <figure key={f.id} className="clickable" onClick={() => setOpen(f)} title="クリックで大きく表示">
+            <StreamVideo stream={f.stream} className="thumb-video" />
+            <figcaption className="muted small">{f.label}</figcaption>
           </figure>
         ))}
       </div>
+      {open && <FeedModal feed={open} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+type SelfFeed = { id: string; label: string; stream: MediaStream };
+
+/** 自分が相手に送っている映像(この PC のカメラと、自分の席のスマホカメラ) */
+export function selfFeeds(view: View, me: Seat): SelfFeed[] {
+  const feeds: SelfFeed[] = [];
+  if (view.localStream) feeds.push({ id: 'local', label: 'この PC のカメラ', stream: view.localStream });
+  for (const c of view.cams) if (c.seat === me) feeds.push({ id: c.peerId, label: c.label, stream: c.stream });
+  return feeds;
+}
+
+function FeedModal({ feed, onClose }: { feed: SelfFeed; onClose: () => void }) {
+  return (
+    <Modal wide onClose={onClose}>
+      <h2>あなたのカメラ({feed.label})</h2>
+      <ZoomView className="snap-box">
+        <StreamVideo stream={feed.stream} className="video-fit" />
+      </ZoomView>
+      <p className="muted small">相手に送っている映像です。盤面が映っているか、文字が読めるかを確かめられます。</p>
+    </Modal>
+  );
+}
+
+/** 相手の映像の隅に、自分のカメラを小さく重ねて表示する。クリックで大きく表示する */
+function SelfPip({ feeds }: { feeds: SelfFeed[] }) {
+  const [open, setOpen] = useState<SelfFeed | null>(null);
+  if (feeds.length === 0) return null;
+  return (
+    <>
+      <div className="self-pip" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        {feeds.map((f) => (
+          <button key={f.id} className="self-pip-item" onClick={() => setOpen(f)} title="クリックで大きく表示">
+            <StreamVideo stream={f.stream} className="video-fit" />
+            <span className="self-pip-label">自分・{f.label}</span>
+          </button>
+        ))}
+      </div>
+      {open && <FeedModal feed={open} onClose={() => setOpen(null)} />}
+    </>
   );
 }
 

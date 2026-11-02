@@ -19,7 +19,10 @@ import { captureStill, tuneSenders } from '../media/camera';
 const PEER_PREFIX = 'ygord-v1-';
 export const hostPeerId = (room: string) => PEER_PREFIX + room;
 
-export type Role = 'player' | 'camera';
+export type Role = 'player' | 'camera' | 'spectator';
+/** 観戦者の上限。カメラ端末は見る人の数だけ映像を送るので、多すぎるとプレイヤーへの映像まで劣化する */
+export const SPECTATOR_MAX = 4;
+export const ROOM_CLOSED_TEXT = 'ホストが部屋を閉じました';
 export type Member = { peerId: string; clientId: string; role: Role; seat: Seat | null; name: string };
 /** 他の端末に配る参加者情報。席の取り戻しに使う clientId は含めない */
 export type PublicMember = Omit<Member, 'clientId'>;
@@ -55,12 +58,14 @@ export type RoomOptions = {
 
 type RoomMsg =
   | { t: 'hello'; clientId: string; role: Role; seat: Seat | null; name: string; camKey: string }
-  | { t: 'welcome'; seat: Seat | null; full: boolean; denied?: boolean }
+  | { t: 'welcome'; seat: Seat | null; full: boolean; denied?: boolean; reject?: string }
   | { t: 'state'; state: GameState; canUndo: boolean }
   | { t: 'members'; members: PublicMember[] }
   | { t: 'intent'; action: Action }
   /** ホストが部屋を閉じた */
   | { t: 'closed' }
+  /** ホストに退出させられた */
+  | { t: 'kicked' }
   /** プレイヤーがカメラ用の合言葉を作り直した */
   | { t: 'camKey'; camKey: string };
 
@@ -314,10 +319,21 @@ export class RoomClient {
       case 'welcome':
         this.denied = !!msg.denied;
         if (msg.denied) return;
+        if (msg.reject) {
+          // 断られたら再接続しない(入り直すにはページを開き直す)
+          this.closed = true;
+          this.set({ status: 'error', detail: String(msg.reject).slice(0, 100), members: [] });
+          this.hostConn?.close();
+          return;
+        }
         this.set({
           seat: this.o.role === 'camera' ? this.view.seat : msg.seat,
-          status: msg.full ? 'full' : 'online',
-          detail: msg.full ? 'このルームは満員のため観戦モードです' : '',
+          status: this.o.role === 'camera' || msg.seat ? 'online' : 'full',
+          detail: msg.full
+            ? '対戦の席が埋まっているため、観戦者として参加しました'
+            : this.o.role === 'spectator'
+              ? '観戦中'
+              : '',
         });
         // ホストが入れ替わった可能性があるので、カメラの送信を張り直す
         this.closeOutCalls();
@@ -330,10 +346,16 @@ export class RoomClient {
         break;
       }
       case 'closed':
-        // 部屋が閉じられたら、再接続もしない
+      case 'kicked':
+        // 部屋が閉じられたとき、退出させられたときは、再接続もしない
         this.closed = true;
         this.closeOutCalls();
-        this.set({ status: 'closed', detail: 'ホストが部屋を閉じました', members: [], cams: [] });
+        this.set({
+          status: 'closed',
+          detail: msg.t === 'closed' ? ROOM_CLOSED_TEXT : 'ホストによって退出しました',
+          members: [],
+          cams: [],
+        });
         this.hostConn?.close();
         break;
       case 'members':
@@ -366,7 +388,7 @@ export class RoomClient {
     if (!st || !msg || typeof msg !== 'object') return;
     if (msg.t === 'hello') {
       if (
-        (msg.role !== 'player' && msg.role !== 'camera') ||
+        (msg.role !== 'player' && msg.role !== 'camera' && msg.role !== 'spectator') ||
         typeof msg.clientId !== 'string' ||
         msg.clientId.length > 64 ||
         typeof msg.camKey !== 'string' ||
@@ -377,6 +399,7 @@ export class RoomClient {
       }
       let seat: Seat | null = null;
       let full = false;
+      let role: Role = msg.role;
       if (msg.role === 'camera') {
         // 合言葉の合うカメラ端末だけを、その席の映像として受け入れる
         if (!isSeat(msg.seat) || !this.camKeys[msg.seat] || this.camKeys[msg.seat] !== msg.camKey) {
@@ -389,12 +412,24 @@ export class RoomClient {
         const p2Online = [...this.memberMap.values()].some(
           (m) => m.role === 'player' && m.seat === 'p2' && m.peerId !== conn.peer,
         );
-        // 同じ端末の再接続か、P2 が空いていれば P2 として迎える
-        if (st.players.p2.clientId === msg.clientId || !p2Online) seat = 'p2';
-        else full = true;
+        // 対戦を選んだ人は、同じ端末の再接続か P2 が空いていれば P2 として迎える。埋まっていれば観戦に回す
+        if (msg.role === 'player' && (st.players.p2.clientId === msg.clientId || !p2Online)) seat = 'p2';
+        else {
+          full = msg.role === 'player';
+          role = 'spectator';
+          const watching = [...this.memberMap.values()].filter(
+            (m) => m.role === 'spectator' && m.peerId !== conn.peer,
+          ).length;
+          // カメラ端末は見る人の数だけ映像を送るので、観戦者の数に上限を設ける
+          if (watching >= SPECTATOR_MAX) {
+            this.send(conn, { t: 'welcome', seat: null, full: true, reject: `観戦者が満員です(${SPECTATOR_MAX}人まで)` });
+            setTimeout(() => conn.close(), 500);
+            return;
+          }
+        }
       }
       const name = String(msg.name ?? '').slice(0, 20);
-      this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, role: msg.role, seat, name });
+      this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, role, seat, name });
       this.roomConns.set(conn.peer, conn);
       if (seat === 'p2' && msg.role === 'player') {
         this.camKeys.p2 = msg.camKey;
@@ -429,6 +464,15 @@ export class RoomClient {
     this.set({ status: 'closed', detail: '部屋を閉じました' });
     // 「閉じた」の連絡が届くよう、少し待ってから切断する
     setTimeout(() => this.destroy(), 800);
+  }
+
+  /** ホストだけが使える。観戦者を退出させる(プレイヤーとカメラ端末は対象外) */
+  kick(peerId: string) {
+    if (!this.o.isHost || this.memberMap.get(peerId)?.role !== 'spectator') return;
+    const conn = this.roomConns.get(peerId);
+    if (!conn) return;
+    this.send(conn, { t: 'kicked' });
+    setTimeout(() => conn.close(), 500);
   }
 
   /** カメラ用の合言葉を差し替える。古い合言葉で入っているカメラ端末は切断する */
@@ -511,9 +555,11 @@ export class RoomClient {
     const peer = this.peer;
     const stream = this.view.localStream;
     if (!peer?.open) return;
-    // 席のない観戦者には送らない
+    // 席のあるプレイヤーと、観戦者(上限はホストが管理)に送る
     const targets = stream
-      ? this.view.members.filter((m) => m.role === 'player' && m.seat && m.peerId !== peer.id)
+      ? this.view.members.filter(
+          (m) => ((m.role === 'player' && m.seat) || m.role === 'spectator') && m.peerId !== peer.id,
+        )
       : [];
     const ids = new Set(targets.map((t) => t.peerId));
     for (const [id, c] of this.outCalls) {
@@ -627,12 +673,15 @@ export class RoomClient {
       this.notify(`スナップショットに失敗しました: ${String(msg.message).slice(0, 100)}`);
       return;
     }
-    if (!(msg.data instanceof ArrayBuffer) || msg.data.byteLength > SNAP_MAX_BYTES || !SNAP_MIMES.has(msg.mime)) {
+    // PeerJS は大きなデータを分割して送り、受け取る側で Uint8Array として組み立てることがあるので、どちらも受け付ける
+    const data: unknown = msg.data;
+    const bytes = data instanceof ArrayBuffer || ArrayBuffer.isView(data) ? data : null;
+    if (!bytes || bytes.byteLength > SNAP_MAX_BYTES || !SNAP_MIMES.has(msg.mime)) {
       this.notify('不正なスナップショットを受け取ったため破棄しました');
       return;
     }
     const cam = this.view.cams.find((c) => c.peerId === conn.peer);
-    const url = URL.createObjectURL(new Blob([msg.data], { type: msg.mime }));
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: msg.mime }));
     const snap: Snap = { id: msg.reqId, seat: cam?.seat ?? null, label: cam?.label ?? 'カメラ', url, at: Date.now() };
     const snaps = [snap, ...this.view.snaps];
     snaps.slice(20).forEach((s) => URL.revokeObjectURL(s.url));
