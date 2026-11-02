@@ -5,6 +5,7 @@ import { getCamKey, getClientId, loadName, roomUrl } from '../identity';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
+import { ResultPanel } from './ResultPanel';
 import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
 
 export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
@@ -55,11 +56,12 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
           <aside className="side">
             <LpCard state={state} seat={other(me)} isMe={false} me={me} dispatch={dispatch} readOnly={readOnly} />
             <LpCard state={state} seat={me} isMe={!readOnly} me={me} dispatch={dispatch} readOnly={readOnly} />
+            <ResultPanel state={state} dispatch={dispatch} readOnly={readOnly} />
             <TurnBar state={state} me={me} dispatch={dispatch} readOnly={readOnly} canUndo={view.canUndo} />
             <ChainPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
             <RollPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
             {seat && <MyCamera view={view} client={client} me={me} />}
-            <LogPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
+            <LogPanel state={state} />
           </aside>
         </main>
       )}

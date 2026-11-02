@@ -34,7 +34,24 @@ export type GameState = {
   chain: ChainLink[];
   log: LogEntry[];
   lastRoll: Roll | null;
+  /** このルームで何戦目か */
+  duelNo: number;
+  /** いまのデュエルの決着。まだなら null */
+  result: DuelResult | null;
+  /** このルームでの通算の戦績 */
+  record: DuelRecord;
 };
+
+export type ResultReason = 'lp' | 'deck' | 'special' | 'other';
+export const REASON_LABEL: Record<ResultReason, string> = {
+  lp: 'LP 0',
+  deck: 'デッキ切れ',
+  special: '特殊勝利',
+  other: 'その他',
+};
+/** winner が null なら引き分け */
+export type DuelResult = { winner: Seat | null; reason: ResultReason; at: number };
+export type DuelRecord = { p1: number; p2: number; draws: number };
 
 export type Action =
   | { type: 'lpAdd'; seat: Seat; delta: number }
@@ -51,7 +68,12 @@ export type Action =
   | { type: 'coin' }
   | { type: 'dice' }
   | { type: 'rename'; name: string }
+  | { type: 'declareResult'; winner: Seat | null; reason: ResultReason }
+  /** 決着後に次のデュエルへ進む。敗者を先攻の既定値にする */
+  | { type: 'nextDuel' }
+  /** 勝敗を記録せずに、いまのデュエルを最初からやり直す */
   | { type: 'resetDuel' }
+  | { type: 'resetRecord' }
   | { type: 'undo' };
 
 const LOG_MAX = 200;
@@ -72,7 +94,38 @@ export function initialState(): GameState {
     chain: [],
     log: [],
     lastRoll: null,
+    duelNo: 1,
+    result: null,
+    record: { p1: 0, p2: 0, draws: 0 },
   };
+}
+
+/** 盤面だけを開始時に戻す(名前・先攻・戦績・履歴は残す) */
+function freshBoard(st: GameState, firstPlayer: Seat): GameState {
+  return {
+    ...st,
+    players: {
+      p1: { ...st.players.p1, lp: START_LP },
+      p2: { ...st.players.p2, lp: START_LP },
+    },
+    turn: 1,
+    firstPlayer,
+    turnPlayer: firstPlayer,
+    phase: 'DP',
+    chain: [],
+    lastRoll: null,
+    result: null,
+  };
+}
+
+function addResult(record: DuelRecord, r: DuelResult, sign: 1 | -1): DuelRecord {
+  const key = r.winner ?? 'draws';
+  return { ...record, [key]: Math.max(0, record[key] + sign) };
+}
+
+export function resultText(st: GameState, r: DuelResult): string {
+  const reason = REASON_LABEL[r.reason];
+  return r.winner ? `${displayName(st, r.winner)}の勝ち(${reason})` : `引き分け(${reason})`;
 }
 
 export function displayName(st: GameState, seat: Seat): string {
@@ -173,16 +226,32 @@ function step(st: GameState, a: Action, by: Seat): GameState {
       const players = { ...st.players, [by]: { ...st.players[by], name } };
       return appendLog({ ...st, players }, by, `${who} → ${name || '(名前なし)'} に改名`);
     }
+    case 'declareResult': {
+      if (st.result) return st;
+      const result: DuelResult = { winner: a.winner, reason: a.reason, at: Date.now() };
+      const record = addResult(st.record, result, 1);
+      return appendLog({ ...st, result, record }, by, `デュエル${st.duelNo}: ${resultText(st, result)}`);
+    }
+    case 'nextDuel': {
+      if (!st.result) return st;
+      // 2戦目以降は直前のデュエルの敗者が先攻・後攻を選ぶので、敗者を先攻の既定値にする。引き分けなら変えない
+      const loser = st.result.winner ? other(st.result.winner) : st.firstPlayer;
+      const next = { ...freshBoard(st, loser), duelNo: st.duelNo + 1 };
+      return appendLog(next, by, `デュエル${next.duelNo}を開始(先攻: ${displayName(st, loser)})`);
+    }
     case 'resetDuel': {
-      const players = {
-        p1: { ...st.players.p1, lp: START_LP },
-        p2: { ...st.players.p2, lp: START_LP },
-      };
+      // 決着を付けたあとのやり直しなら、その勝敗も戦績から取り消す
+      const record = st.result ? addResult(st.record, st.result, -1) : st.record;
       return appendLog(
-        { ...st, players, turn: 1, turnPlayer: st.firstPlayer, phase: 'DP', chain: [], lastRoll: null },
+        { ...freshBoard(st, st.firstPlayer), record },
         by,
-        `新しいデュエルを開始(LP 8000、先攻: ${displayName(st, st.firstPlayer)})`,
+        `デュエル${st.duelNo}をやり直し(先攻: ${displayName(st, st.firstPlayer)})`,
       );
+    }
+    case 'resetRecord': {
+      const { p1, p2, draws } = st.record;
+      if (p1 + p2 + draws === 0) return st;
+      return appendLog({ ...st, record: { p1: 0, p2: 0, draws: 0 } }, by, '通算の戦績をリセット');
     }
     case 'undo':
       return st;
@@ -213,13 +282,19 @@ export function parseAction(v: unknown): Action | null {
       return isText(a.card, 200) ? { type: a.type, card: a.card } : null;
     case 'rename':
       return isText(a.name, 100) ? { type: a.type, name: a.name } : null;
+    case 'declareResult':
+      return (a.winner === null || isSeat(a.winner)) && typeof a.reason === 'string' && Object.hasOwn(REASON_LABEL, a.reason)
+        ? { type: a.type, winner: a.winner, reason: a.reason as ResultReason }
+        : null;
     case 'nextPhase':
     case 'endTurn':
     case 'chainResolve':
     case 'chainClear':
     case 'coin':
     case 'dice':
+    case 'nextDuel':
     case 'resetDuel':
+    case 'resetRecord':
     case 'undo':
       return { type: a.type };
     default:
@@ -238,8 +313,15 @@ export function loadState(room: string): GameState | null {
   try {
     const raw = localStorage.getItem(storageKey(room));
     const v = raw ? JSON.parse(raw) : null;
-    // 先攻の項目がない古い保存データは、プレイヤー1を先攻として読み込む
-    return isGameState(v) ? { ...v, firstPlayer: isSeat(v.firstPlayer) ? v.firstPlayer : 'p1' } : null;
+    if (!isGameState(v)) return null;
+    // 後から足した項目がない古い保存データは、既定値で補って読み込む
+    return {
+      ...v,
+      firstPlayer: isSeat(v.firstPlayer) ? v.firstPlayer : 'p1',
+      duelNo: isInt(v.duelNo, 1, 1_000_000) ? v.duelNo : 1,
+      result: v.result ?? null,
+      record: v.record ?? { p1: 0, p2: 0, draws: 0 },
+    };
   } catch {
     return null;
   }

@@ -222,20 +222,12 @@ export function RollPanel({ state, dispatch, readOnly }: Props) {
   );
 }
 
-export function LogPanel({ state, dispatch, readOnly }: Props) {
+export function LogPanel({ state }: Pick<Props, 'state'>) {
   const fmt = (at: number) => new Date(at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return (
     <div className="panel">
       <div className="panel-head">
         <strong>履歴</strong>
-        {!readOnly && (
-          <button
-            className="small-btn"
-            onClick={() => confirm('LP を 8000 に戻して新しいデュエルを始めますか?') && dispatch({ type: 'resetDuel' })}
-          >
-            新しいデュエル
-          </button>
-        )}
       </div>
       <ul className="log">
         {[...state.log].reverse().map((e) => (

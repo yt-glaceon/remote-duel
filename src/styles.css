@@ -526,3 +526,36 @@ input {
   color: #1a1400;
   font-weight: 600;
 }
+.result-panel.alert {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.result-hint {
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+.result-buttons {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.result-buttons button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result-banner {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  text-align: center;
+}
+.result-banner.win-p1 {
+  border-left: 4px solid var(--p1);
+}
+.result-banner.win-p2 {
+  border-left: 4px solid var(--p2);
+}
