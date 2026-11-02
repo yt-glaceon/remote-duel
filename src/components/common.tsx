@@ -7,6 +7,7 @@ const STATUS_LABEL: Record<Status, string> = {
   reconnecting: '再接続中',
   full: '観戦',
   error: 'エラー',
+  closed: '終了',
 };
 
 export function StatusPill({ status, detail }: { status: Status; detail: string }) {

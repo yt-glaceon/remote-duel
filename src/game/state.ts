@@ -304,24 +304,98 @@ export function parseAction(v: unknown): Action | null {
 
 function isGameState(v: unknown): v is GameState {
   const s = v as GameState;
-  return !!s && typeof s.version === 'number' && !!s.players?.p1 && !!s.players?.p2 && Array.isArray(s.log);
+  return (
+    !!s &&
+    typeof s === 'object' &&
+    !!s.players?.p1 &&
+    !!s.players?.p2 &&
+    typeof s.players.p1 === 'object' &&
+    typeof s.players.p2 === 'object' &&
+    Array.isArray(s.log) &&
+    Array.isArray(s.chain)
+  );
 }
 
-const storageKey = (room: string) => `ygord-state-${room}`;
+/**
+ * 外から来た状態(保存データ・ホストからの受信)を確かめ、足りない項目を既定値で補う。
+ * 画面が落ちないよう、表示に使う項目の型だけは必ずそろえる。不正なら null
+ */
+export function normalizeState(v: unknown): GameState | null {
+  if (!isGameState(v)) return null;
+  const s = v as GameState & Record<string, unknown>;
+  const lp = (n: unknown) => (isInt(n, 0, LP_MAX) ? n : START_LP);
+  const text = (t: unknown, max: number) => (typeof t === 'string' ? t.slice(0, max) : '');
+  const player = (p: Player): Player => ({
+    name: text(p.name, 20),
+    lp: lp(p.lp),
+    clientId: typeof p.clientId === 'string' ? p.clientId : null,
+  });
+  const rec = (s.record ?? {}) as Partial<DuelRecord>;
+  const count = (n: unknown) => (isInt(n, 0, 1_000_000) ? n : 0);
+  const r = s.result as DuelResult | null | undefined;
+  return {
+    version: isInt(s.version, 0, Number.MAX_SAFE_INTEGER) ? s.version : 1,
+    players: { p1: player(s.players.p1), p2: player(s.players.p2) },
+    turn: isInt(s.turn, 1, 1_000_000) ? s.turn : 1,
+    turnPlayer: isSeat(s.turnPlayer) ? s.turnPlayer : 'p1',
+    // 後から足した項目がない古い保存データは、既定値で補って読み込む
+    firstPlayer: isSeat(s.firstPlayer) ? s.firstPlayer : 'p1',
+    phase: PHASES.includes(s.phase) ? s.phase : 'DP',
+    chain: s.chain
+      .filter((l) => l && typeof l.card === 'string' && isSeat(l.by))
+      .slice(0, CHAIN_MAX)
+      .map((l) => ({ card: text(l.card, 60), by: l.by, resolved: !!l.resolved })),
+    log: s.log
+      .filter((e) => e && typeof e.text === 'string' && typeof e.id === 'number')
+      .slice(-LOG_MAX)
+      .map((e) => ({ id: e.id, at: Number(e.at) || 0, by: isSeat(e.by) ? e.by : null, text: text(e.text, 200) })),
+    lastRoll:
+      s.lastRoll && (s.lastRoll.kind === 'coin' || s.lastRoll.kind === 'dice') && isSeat(s.lastRoll.by)
+        ? { ...s.lastRoll, value: text(s.lastRoll.value, 4) }
+        : null,
+    duelNo: isInt(s.duelNo, 1, 1_000_000) ? s.duelNo : 1,
+    result:
+      r && (r.winner === null || isSeat(r.winner)) && Object.hasOwn(REASON_LABEL, r.reason)
+        ? { winner: r.winner, reason: r.reason, at: Number(r.at) || 0 }
+        : null,
+    record: { p1: count(rec.p1), p2: count(rec.p2), draws: count(rec.draws) },
+  };
+}
+
+/** 他の端末に送るときは、席の取り戻しに使う clientId を伏せる */
+export function publicState(st: GameState): GameState {
+  return {
+    ...st,
+    players: { p1: { ...st.players.p1, clientId: null }, p2: { ...st.players.p2, clientId: null } },
+  };
+}
+
+const STORAGE_PREFIX = 'ygord-state-';
+const storageKey = (room: string) => STORAGE_PREFIX + room;
+/** 最後に保存してから1日使われなかった部屋のデータは捨てる */
+const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
+
+type Saved = { savedAt: number; state: unknown };
+
+function readSaved(key: string): Saved | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const v = JSON.parse(raw);
+  // 保存日時のない古い形式は、期限切れとして扱う
+  return v && typeof v.savedAt === 'number' ? (v as Saved) : { savedAt: 0, state: v };
+}
+
+const expired = (s: Saved) => Date.now() - s.savedAt > ROOM_TTL_MS;
 
 export function loadState(room: string): GameState | null {
   try {
-    const raw = localStorage.getItem(storageKey(room));
-    const v = raw ? JSON.parse(raw) : null;
-    if (!isGameState(v)) return null;
-    // 後から足した項目がない古い保存データは、既定値で補って読み込む
-    return {
-      ...v,
-      firstPlayer: isSeat(v.firstPlayer) ? v.firstPlayer : 'p1',
-      duelNo: isInt(v.duelNo, 1, 1_000_000) ? v.duelNo : 1,
-      result: v.result ?? null,
-      record: v.record ?? { p1: 0, p2: 0, draws: 0 },
-    };
+    const saved = readSaved(storageKey(room));
+    if (!saved) return null;
+    if (expired(saved)) {
+      localStorage.removeItem(storageKey(room));
+      return null;
+    }
+    return normalizeState(saved.state);
   } catch {
     return null;
   }
@@ -329,8 +403,38 @@ export function loadState(room: string): GameState | null {
 
 export function saveState(room: string, st: GameState): void {
   try {
-    localStorage.setItem(storageKey(room), JSON.stringify(st));
+    const saved: Saved = { savedAt: Date.now(), state: st };
+    localStorage.setItem(storageKey(room), JSON.stringify(saved));
   } catch {
     // 保存できなくても対戦は続けられる
+  }
+}
+
+export function deleteState(room: string): void {
+  try {
+    localStorage.removeItem(storageKey(room));
+  } catch {
+    // 消せなくても、期限が来れば読み込まれなくなる
+  }
+}
+
+/** 期限切れや壊れた部屋のデータをまとめて消す。起動時に呼ぶ */
+export function purgeExpiredStates(): void {
+  try {
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter(
+      (k): k is string => !!k && k.startsWith(STORAGE_PREFIX),
+    );
+    for (const k of keys) {
+      let drop = true;
+      try {
+        const saved = readSaved(k);
+        drop = !saved || expired(saved);
+      } catch {
+        // 読めないデータは消す
+      }
+      if (drop) localStorage.removeItem(k);
+    }
+  } catch {
+    // ストレージが使えない環境では何もしない
   }
 }

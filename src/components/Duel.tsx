@@ -1,7 +1,8 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { other, type Action } from '../game/state';
-import { getCamKey, getClientId, loadName, roomUrl } from '../identity';
+import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl } from '../identity';
+import type { RoomClient } from '../net/room';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
@@ -9,13 +10,15 @@ import { ResultPanel } from './ResultPanel';
 import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
 
 export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
+  // 合言葉は最初の1回だけ読む(描画のたびに読むと、部屋を閉じて消した直後に作り直してしまう)
+  const [camKey] = useState(() => getCamKey(room));
   const [view, client] = useRoom({
     room,
     isHost,
     role: 'player',
     name: loadName(),
     clientId: getClientId(),
-    camKey: getCamKey(room),
+    camKey,
   });
   const [showPhone, setShowPhone] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -32,6 +35,27 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
 
   const p2Online = view.members.some((m) => m.role === 'player' && m.seat === 'p2');
 
+  const closeRoom = () => {
+    if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
+    client.closeRoom();
+    forgetCamKey(room);
+    setTimeout(() => (location.search = ''), 1000);
+  };
+
+  if (view.status === 'closed') {
+    return (
+      <div className="app">
+        <div className="center">
+          <p>{view.detail}</p>
+          <p className="muted small">この部屋の招待リンクは、もう使わないでください。</p>
+          <button className="primary" onClick={() => (location.search = '')}>
+            最初の画面へ
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="bar">
@@ -43,6 +67,11 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
         {isHost && !p2Online && <span className="muted small">相手を待っています →</span>}
         <button onClick={() => void copyInvite()}>{copied ? 'コピーしました' : '招待リンクをコピー'}</button>
         {seat && <button onClick={() => setShowPhone(true)}>スマホをカメラにする</button>}
+        {isHost && (
+          <button className="danger" onClick={closeRoom}>
+            部屋を閉じる
+          </button>
+        )}
       </header>
 
       {!state ? (
@@ -66,14 +95,27 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
         </main>
       )}
 
-      {showPhone && seat && <PhoneCameraModal room={room} seat={seat} onClose={() => setShowPhone(false)} />}
+      {showPhone && seat && (
+        <PhoneCameraModal room={room} seat={seat} client={client} onClose={() => setShowPhone(false)} />
+      )}
       <Toast notice={view.notice} />
     </div>
   );
 }
 
-function PhoneCameraModal({ room, seat, onClose }: { room: string; seat: 'p1' | 'p2'; onClose: () => void }) {
-  const url = roomUrl(room, { cam: seat, key: getCamKey(room) });
+function PhoneCameraModal({
+  room,
+  seat,
+  client,
+  onClose,
+}: {
+  room: string;
+  seat: 'p1' | 'p2';
+  client: RoomClient;
+  onClose: () => void;
+}) {
+  const [camKey, setCamKey] = useState(() => getCamKey(room));
+  const url = roomUrl(room, { cam: seat, key: camKey });
   const [qr, setQr] = useState('');
   useEffect(() => {
     void QRCode.toDataURL(url, { width: 260, margin: 1 }).then(setQr);
@@ -86,6 +128,17 @@ function PhoneCameraModal({ room, seat, onClose }: { room: string; seat: 'p1' | 
       <p className="muted small">このリンクにはあなた専用の合言葉が入っています。ほかの人には送らないでください。</p>
       {qr && <img src={qr} alt="カメラ端末用リンクの QR コード" className="qr" />}
       <input readOnly value={url} onFocus={(e) => e.target.select()} />
+      <button
+        onClick={() => {
+          if (!confirm('合言葉を作り直しますか?いまのリンクで接続中のカメラ端末は切断され、古いリンクでは入れなくなります。')) return;
+          const key = renewCamKey(room);
+          client.renewCamKey(key);
+          setCamKey(key);
+        }}
+      >
+        合言葉を作り直す
+      </button>
+      <p className="muted small">リンクを他の人に知られたときや、カメラ端末を替えたいときに使います。</p>
       {insecure && <p className="error small">いまは HTTPS ではないため、スマホのカメラは使えません。公開した URL か `npm run dev:lan` で開いてください。</p>}
     </Modal>
   );

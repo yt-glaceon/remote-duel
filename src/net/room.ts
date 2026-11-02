@@ -2,9 +2,12 @@
 import Peer, { type DataConnection, type MediaConnection, type PeerOptions } from 'peerjs';
 import {
   appendLog,
+  deleteState,
   initialState,
   loadState,
+  normalizeState,
   parseAction,
+  publicState,
   reduce,
   saveState,
   type Action,
@@ -18,9 +21,11 @@ export const hostPeerId = (room: string) => PEER_PREFIX + room;
 
 export type Role = 'player' | 'camera';
 export type Member = { peerId: string; clientId: string; role: Role; seat: Seat | null; name: string };
+/** 他の端末に配る参加者情報。席の取り戻しに使う clientId は含めない */
+export type PublicMember = Omit<Member, 'clientId'>;
 export type RemoteCam = { peerId: string; seat: Seat | null; label: string; stream: MediaStream };
 export type Snap = { id: string; seat: Seat | null; label: string; url: string; at: number };
-export type Status = 'connecting' | 'online' | 'reconnecting' | 'full' | 'error';
+export type Status = 'connecting' | 'online' | 'reconnecting' | 'full' | 'error' | 'closed';
 
 export type View = {
   status: Status;
@@ -28,7 +33,7 @@ export type View = {
   seat: Seat | null;
   state: GameState | null;
   canUndo: boolean;
-  members: Member[];
+  members: PublicMember[];
   cams: RemoteCam[];
   localStream: MediaStream | null;
   snaps: Snap[];
@@ -52,8 +57,12 @@ type RoomMsg =
   | { t: 'hello'; clientId: string; role: Role; seat: Seat | null; name: string; camKey: string }
   | { t: 'welcome'; seat: Seat | null; full: boolean; denied?: boolean }
   | { t: 'state'; state: GameState; canUndo: boolean }
-  | { t: 'members'; members: Member[] }
-  | { t: 'intent'; action: Action };
+  | { t: 'members'; members: PublicMember[] }
+  | { t: 'intent'; action: Action }
+  /** ホストが部屋を閉じた */
+  | { t: 'closed' }
+  /** プレイヤーがカメラ用の合言葉を作り直した */
+  | { t: 'camKey'; camKey: string };
 
 type CamMsg =
   | { t: 'snapReq'; reqId: string }
@@ -93,6 +102,8 @@ export class RoomClient {
   private restartTimer: ReturnType<typeof setTimeout> | undefined;
   private connectTimer: ReturnType<typeof setTimeout> | undefined;
   private camLabel = 'カメラ';
+  private camKey: string;
+  private closed = false;
 
   // ゲスト側
   private hostConn: DataConnection | null = null;
@@ -110,6 +121,7 @@ export class RoomClient {
   private pendingSnaps = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private o: RoomOptions) {
+    this.camKey = o.camKey;
     this.view = {
       status: 'connecting',
       detail: '',
@@ -162,7 +174,7 @@ export class RoomClient {
   // ---- 接続の確立 ----
 
   private startHost() {
-    this.camKeys.p1 = this.o.camKey;
+    this.camKeys.p1 = this.camKey;
     if (!this.view.state) {
       const st = loadState(this.o.room) ?? initialState();
       st.players.p1 = { ...st.players.p1, clientId: this.o.clientId, name: st.players.p1.name || this.o.name };
@@ -256,7 +268,7 @@ export class RoomClient {
 
   private connectHost() {
     const peer = this.peer;
-    if (!peer || peer.destroyed || this.destroyed || this.hostConn?.open) return;
+    if (!peer || peer.destroyed || this.destroyed || this.closed || this.hostConn?.open) return;
     this.hostConn?.close();
     if (!this.denied) this.set({ status: this.view.state ? 'reconnecting' : 'connecting' });
     const conn = peer.connect(hostPeerId(this.o.room), { reliable: true, metadata: { kind: 'room' } });
@@ -268,13 +280,14 @@ export class RoomClient {
         role: this.o.role,
         seat: this.o.role === 'camera' ? (this.o.seat ?? null) : null,
         name: this.o.name,
-        camKey: this.o.camKey,
+        camKey: this.camKey,
       });
     });
     conn.on('data', (d) => this.onGuestMsg(d as RoomMsg));
     conn.on('close', () => {
       if (this.hostConn !== conn) return;
       this.hostConn = null;
+      if (this.closed) return;
       if (this.denied) {
         this.set({
           status: 'error',
@@ -310,11 +323,21 @@ export class RoomClient {
         this.closeOutCalls();
         this.syncCalls();
         break;
-      case 'state':
-        this.set({ state: msg.state, canUndo: msg.canUndo });
+      case 'state': {
+        // ホストからの状態も、画面が落ちないよう形を確かめてから使う
+        const state = normalizeState(msg.state);
+        if (state) this.set({ state, canUndo: !!msg.canUndo });
+        break;
+      }
+      case 'closed':
+        // 部屋が閉じられたら、再接続もしない
+        this.closed = true;
+        this.closeOutCalls();
+        this.set({ status: 'closed', detail: 'ホストが部屋を閉じました', members: [], cams: [] });
+        this.hostConn?.close();
         break;
       case 'members':
-        this.setMembers(msg.members);
+        if (Array.isArray(msg.members)) this.setMembers(msg.members.filter((m) => m && typeof m.peerId === 'string'));
         break;
     }
   }
@@ -383,12 +406,42 @@ export class RoomClient {
         }
       }
       this.send(conn, { t: 'welcome', seat, full });
-      this.send(conn, { t: 'state', state: this.view.state!, canUndo: this.history.length > 0 });
+      this.send(conn, { t: 'state', state: publicState(this.view.state!), canUndo: this.history.length > 0 });
       this.publishMembers();
+    } else if (msg.t === 'camKey') {
+      const m = this.memberMap.get(conn.peer);
+      if (m?.role === 'player' && m.seat && typeof msg.camKey === 'string' && msg.camKey.length <= 64) {
+        this.applyCamKey(m.seat, msg.camKey);
+      }
     } else if (msg.t === 'intent') {
       const m = this.memberMap.get(conn.peer);
       const action = parseAction(msg.action);
       if (m?.role === 'player' && m.seat && action) this.apply(action, m.seat);
+    }
+  }
+
+  /** ホストだけが使える。全員を切断し、この部屋の保存データを消す */
+  closeRoom() {
+    if (!this.o.isHost) return;
+    for (const conn of this.roomConns.values()) this.send(conn, { t: 'closed' });
+    deleteState(this.o.room);
+    this.closed = true;
+    this.set({ status: 'closed', detail: '部屋を閉じました' });
+    // 「閉じた」の連絡が届くよう、少し待ってから切断する
+    setTimeout(() => this.destroy(), 800);
+  }
+
+  /** カメラ用の合言葉を差し替える。古い合言葉で入っているカメラ端末は切断する */
+  renewCamKey(camKey: string) {
+    this.camKey = camKey;
+    if (this.o.isHost) this.applyCamKey('p1', camKey);
+    else if (this.hostConn) this.send(this.hostConn, { t: 'camKey', camKey });
+  }
+
+  private applyCamKey(seat: Seat, camKey: string) {
+    this.camKeys[seat] = camKey;
+    for (const [peerId, m] of this.memberMap) {
+      if (m.role === 'camera' && m.seat === seat) this.roomConns.get(peerId)?.close();
     }
   }
 
@@ -417,19 +470,20 @@ export class RoomClient {
     const canUndo = this.history.length > 0;
     this.set({ state: st, canUndo });
     saveState(this.o.room, st);
-    for (const conn of this.roomConns.values()) this.send(conn, { t: 'state', state: st, canUndo });
+    const wire = publicState(st);
+    for (const conn of this.roomConns.values()) this.send(conn, { t: 'state', state: wire, canUndo });
   }
 
   private publishMembers() {
     if (!this.peer?.open) return;
-    const self: Member = { peerId: this.peer.id, clientId: this.o.clientId, role: 'player', seat: 'p1', name: this.o.name };
-    const members = [self, ...this.memberMap.values()];
+    const self: PublicMember = { peerId: this.peer.id, role: 'player', seat: 'p1', name: this.o.name };
+    const members: PublicMember[] = [self, ...[...this.memberMap.values()].map(({ clientId: _, ...m }) => m)];
     for (const conn of this.roomConns.values()) this.send(conn, { t: 'members', members });
     this.setMembers(members);
   }
 
   /** 映像の席は送信者の自己申告を信じず、ホストが割り当てた参加者一覧から引く */
-  private setMembers(members: Member[]) {
+  private setMembers(members: PublicMember[]) {
     const seatOf = (peerId: string) => members.find((m) => m.peerId === peerId)?.seat ?? null;
     this.set({ members, cams: this.view.cams.map((c) => ({ ...c, seat: seatOf(c.peerId) })) });
     this.syncCalls();

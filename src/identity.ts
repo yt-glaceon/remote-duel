@@ -33,6 +33,21 @@ export function getCamKey(room: string): string {
   return v;
 }
 
+/** 合言葉を作り直す。以後、古いカメラ用リンクでは入れない */
+export function renewCamKey(room: string): string {
+  const v = randomToken();
+  safeSet(sessionStorage, `ygord-camkey-${room}`, v);
+  return v;
+}
+
+export function forgetCamKey(room: string): void {
+  try {
+    sessionStorage.removeItem(`ygord-camkey-${room}`);
+  } catch {
+    // 消せなくてもタブを閉じれば消える
+  }
+}
+
 function randomToken(): string {
   const a = new Uint8Array(16);
   crypto.getRandomValues(a);
