@@ -63,18 +63,21 @@ export function LpCard({ state, seat, isMe, dispatch, readOnly }: Props & { seat
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
-              placeholder="例: 1800、2400*2、+500、=4000"
-              title="数字か式(+ - * / と括弧)。先頭に何もなければダメージ、+ なら回復、= なら値の指定"
+              placeholder="例: 1800、2400*2"
+              title="数字か式(+ - * / と括弧)。Enter はダメージ。先頭に + で回復、= で値の指定もできる"
             />
             <button onClick={() => submit('damage')} className="danger">
               ダメージ
             </button>
             <button onClick={() => submit('heal')}>回復</button>
+            <button onClick={() => submit('set')} title="入力した値を LP にする">
+              指定
+            </button>
           </div>
           {input.trim() && (
             <div className={`lp-preview small ${preview ? '' : 'error'}`}>
               {preview
-                ? `${{ damage: 'ダメージ', heal: '回復', set: '指定' }[preview.kind]} ${preview.amount}(${p.lp} → ${after})`
+                ? `Enter で${{ damage: 'ダメージ', heal: '回復', set: '指定' }[preview.kind]} ${preview.amount}(${p.lp} → ${after})`
                 : '計算できない式です'}
             </div>
           )}
