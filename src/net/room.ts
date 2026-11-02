@@ -34,7 +34,7 @@ export const ROOM_CLOSED_TEXT = 'ホストが部屋を閉じました';
  */
 type Member = { peerId: string; clientId: string; camera: boolean; owner: string | null; name: string };
 /** 他の端末に配る参加者情報。席の取り戻しに使う clientId は含めない */
-export type PublicMember = { peerId: string; role: Role; seat: Seat | null; name: string };
+export type PublicMember = { peerId: string; role: Role; seat: Seat | null; name: string; host?: boolean };
 export type RemoteCam = { peerId: string; seat: Seat | null; label: string; stream: MediaStream };
 export type Snap = { id: string; seat: Seat | null; label: string; url: string; at: number };
 export type Status = 'connecting' | 'online' | 'reconnecting' | 'full' | 'error' | 'closed';
@@ -634,6 +634,7 @@ export class RoomClient {
       role: hostSeat ? 'player' : 'spectator',
       seat: hostSeat,
       name: this.hostName,
+      host: true,
     };
     const others = [...this.memberMap.values()].map((m): PublicMember => {
       const seat = seatOf(st, m.camera ? m.owner : m.clientId);

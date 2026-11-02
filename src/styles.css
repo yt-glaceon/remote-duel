@@ -589,6 +589,21 @@ input {
   font-size: 12px;
   opacity: 0.7;
 }
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 18px;
+  border: 1px solid currentColor;
+  opacity: 0.7;
+  vertical-align: middle;
+}
+.tag-me {
+  opacity: 1;
+  font-weight: 600;
+}
 .seat-name {
   flex: 1;
   min-width: 0;

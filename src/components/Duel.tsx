@@ -2,7 +2,7 @@ import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { canChangeSeats, displayName, other, SEATS, type Action, type GameState, type Seat } from '../game/state';
 import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl } from '../identity';
-import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type RoomClient, type View } from '../net/room';
+import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient, type View } from '../net/room';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
@@ -154,21 +154,36 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
     client.requestSeat(s);
   };
 
+  const people = view.members.filter((m) => m.role !== 'camera').length;
+  const tags = (m: PublicMember | undefined) => (
+    <>
+      {m?.host && <span className="tag">ホスト</span>}
+      {m && m.peerId === selfId && <span className="tag tag-me">あなた</span>}
+    </>
+  );
+
   return (
     <div className="panel seats">
       <div className="panel-head">
-        <strong>席</strong>
-        <span className="muted small">{free ? '入れ替えできます' : 'デュエル中は入れ替えできません'}</span>
+        <strong>参加者 {people}人</strong>
+        <span className="muted small">{free ? '席を入れ替えできます' : 'デュエル中は席を入れ替えできません'}</span>
       </div>
       {SEATS.map((s) => {
-        const seated = view.members.some((m) => m.role === 'player' && m.seat === s);
+        const holder = view.members.find((m) => m.role === 'player' && m.seat === s);
+        const cams = view.members.filter((m) => m.role === 'camera' && m.seat === s).length;
+        const seated = !!holder;
         const away = !seated && !!state.players[s].name;
         return (
           <div key={s} className="seat-row">
             <span className="seat-label">{s === 'p1' ? 'P1' : 'P2'}</span>
             <span className="seat-name">
               {seated ? displayName(state, s) : away ? `${state.players[s].name}(切断中)` : <span className="muted">空席</span>}
-              {me === s && <small> (あなた)</small>}
+              {tags(holder)}
+              {cams > 0 && (
+                <span className="tag" title="この席の映像を送っているスマホ">
+                  📷 スマホ{cams > 1 ? ` ×${cams}` : ''}
+                </span>
+              )}
             </span>
             {!seated && me !== s && (free || !me) && (
               <button className="small-btn" onClick={() => sit(s, away)}>
@@ -193,11 +208,11 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
         <ul className="watchers">
           {watchers.map((w) => (
             <li key={w.peerId}>
-              <span>
+              <span className="seat-name">
                 {w.name || '(名前なし)'}
-                {w.peerId === selfId && <small> (あなた)</small>}
+                {tags(w)}
               </span>
-              {isHost && w.peerId !== selfId && (
+              {isHost && !w.host && (
                 <button className="danger small-btn" onClick={() => client.kick(w.peerId)}>
                   退出させる
                 </button>
