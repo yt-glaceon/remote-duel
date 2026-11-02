@@ -8,6 +8,6 @@ export function App() {
   const room = params.get('room')?.toLowerCase() ?? '';
   if (!ROOM_RE.test(room)) return <Lobby />;
   const cam = params.get('cam');
-  if (cam === 'p1' || cam === 'p2') return <CameraOnly room={room} seat={cam} />;
+  if (cam === 'p1' || cam === 'p2') return <CameraOnly room={room} seat={cam} camKey={params.get('key') ?? ''} />;
   return <Duel room={room} isHost={params.get('host') === '1'} />;
 }

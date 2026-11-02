@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { parseLpInput, type LpOp } from '../game/lpInput';
 import { displayName, PHASE_LABEL, PHASES, type Action, type GameState, type Seat } from '../game/state';
 
 type Props = { state: GameState; me: Seat; dispatch: (a: Action) => void; readOnly: boolean };
@@ -18,17 +19,18 @@ export function LpCard({ state, seat, isMe, dispatch, readOnly }: Props & { seat
     return () => clearTimeout(t);
   }, [p.lp]);
 
-  // 「1800」はダメージ、「+500」は回復、「=4000」は値の指定
-  const submit = (mode?: 'damage' | 'heal' | 'set') => {
-    const raw = input.trim().replace(/[，,]/g, '');
-    const m = raw.match(/^([+\-=]?)(\d{1,6})$/);
-    if (!m) return;
-    const n = Number(m[2]);
-    const kind = mode ?? (m[1] === '+' ? 'heal' : m[1] === '=' ? 'set' : 'damage');
-    if (kind === 'set') dispatch({ type: 'lpSet', seat, value: n });
-    else dispatch({ type: 'lpAdd', seat, delta: kind === 'heal' ? n : -n });
+  // 数値でも式でもよい。「1800」はダメージ、「+500」は回復、「=4000」は値の指定
+  const submit = (mode?: LpOp['kind']) => {
+    const op = parseLpInput(input, mode);
+    if (!op) return;
+    if (op.kind === 'set') dispatch({ type: 'lpSet', seat, value: op.amount });
+    else dispatch({ type: 'lpAdd', seat, delta: op.kind === 'heal' ? op.amount : -op.amount });
     setInput('');
   };
+  const preview = input.trim() ? parseLpInput(input) : null;
+  const after =
+    preview &&
+    Math.max(0, preview.kind === 'set' ? preview.amount : p.lp + (preview.kind === 'heal' ? preview.amount : -preview.amount));
 
   return (
     <div className={`lp-card ${isMe ? 'me' : 'opp'} ${state.turnPlayer === seat ? 'turn' : ''}`}>
@@ -58,17 +60,24 @@ export function LpCard({ state, seat, isMe, dispatch, readOnly }: Props & { seat
           <div className="row">
             <input
               className="lp-input"
-              inputMode="numeric"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submit()}
-              placeholder="1800 / +500 / =4000"
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
+              placeholder="例: 1800、2400*2、+500、=4000"
+              title="数字か式(+ - * / と括弧)。先頭に何もなければダメージ、+ なら回復、= なら値の指定"
             />
             <button onClick={() => submit('damage')} className="danger">
               ダメージ
             </button>
             <button onClick={() => submit('heal')}>回復</button>
           </div>
+          {input.trim() && (
+            <div className={`lp-preview small ${preview ? '' : 'error'}`}>
+              {preview
+                ? `${{ damage: 'ダメージ', heal: '回復', set: '指定' }[preview.kind]} ${preview.amount}(${p.lp} → ${after})`
+                : '計算できない式です'}
+            </div>
+          )}
           <div className="row chips">
             {[100, 500, 1000].map((n) => (
               <button key={n} onClick={() => dispatch({ type: 'lpAdd', seat, delta: -n })}>

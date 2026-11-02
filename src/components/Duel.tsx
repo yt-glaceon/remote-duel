@@ -1,14 +1,21 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { other, type Action } from '../game/state';
-import { getClientId, loadName, roomUrl } from '../identity';
+import { getCamKey, getClientId, loadName, roomUrl } from '../identity';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
 import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
 
 export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
-  const [view, client] = useRoom({ room, isHost, role: 'player', name: loadName(), clientId: getClientId() });
+  const [view, client] = useRoom({
+    room,
+    isHost,
+    role: 'player',
+    name: loadName(),
+    clientId: getClientId(),
+    camKey: getCamKey(room),
+  });
   const [showPhone, setShowPhone] = useState(false);
   const [copied, setCopied] = useState(false);
   const { state, seat } = view;
@@ -64,7 +71,7 @@ export function Duel({ room, isHost }: { room: string; isHost: boolean }) {
 }
 
 function PhoneCameraModal({ room, seat, onClose }: { room: string; seat: 'p1' | 'p2'; onClose: () => void }) {
-  const url = roomUrl(room, { cam: seat });
+  const url = roomUrl(room, { cam: seat, key: getCamKey(room) });
   const [qr, setQr] = useState('');
   useEffect(() => {
     void QRCode.toDataURL(url, { width: 260, margin: 1 }).then(setQr);
@@ -74,6 +81,7 @@ function PhoneCameraModal({ room, seat, onClose }: { room: string; seat: 'p1' | 
     <Modal onClose={onClose}>
       <h2>スマホをカメラにする</h2>
       <p className="muted">スマホでこの QR コードを読み取り、盤面の真上に固定してください。映像は相手に届き、あなたの画面にも小さく表示されます。</p>
+      <p className="muted small">このリンクにはあなた専用の合言葉が入っています。ほかの人には送らないでください。</p>
       {qr && <img src={qr} alt="カメラ端末用リンクの QR コード" className="qr" />}
       <input readOnly value={url} onFocus={(e) => e.target.select()} />
       {insecure && <p className="error small">いまは HTTPS ではないため、スマホのカメラは使えません。公開した URL か `npm run dev:lan` で開いてください。</p>}

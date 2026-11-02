@@ -25,12 +25,27 @@ export function getClientId(): string {
   return memoClientId;
 }
 
+/** カメラ端末用リンクに入れる合言葉。部屋ごと・タブごとに作り、再読み込みでは変えない */
+export function getCamKey(room: string): string {
+  const key = `ygord-camkey-${room}`;
+  const v = safeGet(sessionStorage, key) ?? randomToken();
+  safeSet(sessionStorage, key, v);
+  return v;
+}
+
+function randomToken(): string {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return Array.from(a, (n) => n.toString(16).padStart(2, '0')).join('');
+}
+
 export const loadName = () => safeGet(localStorage, 'ygord-name') ?? '';
 export const saveName = (name: string) => safeSet(localStorage, 'ygord-name', name);
 
 export function newRoomId(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  const a = new Uint32Array(6);
+  // 推測されにくいよう 10 文字(約 49 ビット)にする
+  const a = new Uint32Array(10);
   crypto.getRandomValues(a);
   return Array.from(a, (n) => chars[n % chars.length]).join('');
 }

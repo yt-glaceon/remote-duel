@@ -7,8 +7,16 @@ import { StreamVideo } from './ZoomView';
 import { StatusPill, Toast } from './common';
 
 /** スマホなどをカメラ専用の端末としてルームに参加させる画面 */
-export function CameraOnly({ room, seat }: { room: string; seat: Seat }) {
-  const [view, client] = useRoom({ room, isHost: false, role: 'camera', seat, name: loadName(), clientId: getClientId() });
+export function CameraOnly({ room, seat, camKey }: { room: string; seat: Seat; camKey: string }) {
+  const [view, client] = useRoom({
+    room,
+    isHost: false,
+    role: 'camera',
+    seat,
+    name: loadName(),
+    clientId: getClientId(),
+    camKey,
+  });
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');

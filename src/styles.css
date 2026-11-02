@@ -489,3 +489,11 @@ input {
   padding: 10px 16px;
   z-index: 20;
 }
+.lp-preview {
+  margin-top: 4px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.lp-preview.error {
+  color: #ff9a92;
+}

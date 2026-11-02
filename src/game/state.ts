@@ -51,6 +51,8 @@ export type Action =
   | { type: 'undo' };
 
 const LOG_MAX = 200;
+const CHAIN_MAX = 30;
+const LP_MAX = 999_999;
 
 export function initialState(): GameState {
   return {
@@ -86,7 +88,7 @@ function randomInt(max: number): number {
 
 function setLp(st: GameState, seat: Seat, lp: number, by: Seat): GameState {
   const before = st.players[seat].lp;
-  const after = Math.max(0, Math.round(lp));
+  const after = Math.min(LP_MAX, Math.max(0, Math.round(lp)));
   if (after === before) return st;
   const diff = after - before;
   const players = { ...st.players, [seat]: { ...st.players[seat], lp: after } };
@@ -132,7 +134,7 @@ function step(st: GameState, a: Action, by: Seat): GameState {
       return appendLog({ ...st, turnPlayer: a.seat }, by, `ターンプレイヤーを${displayName(st, a.seat)}に変更`);
     case 'chainAdd': {
       const card = a.card.trim().slice(0, 60);
-      if (!card) return st;
+      if (!card || st.chain.length >= CHAIN_MAX) return st;
       const chain = [...st.chain, { card, by, resolved: false }];
       return appendLog({ ...st, chain }, by, `チェーン${chain.length}: ${card}(${who})`);
     }
@@ -171,6 +173,43 @@ function step(st: GameState, a: Action, by: Seat): GameState {
     }
     case 'undo':
       return st;
+  }
+}
+
+const isSeat = (v: unknown): v is Seat => v === 'p1' || v === 'p2';
+const isInt = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+const isText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
+
+/** ゲストから届いた操作は信用せず、形を確かめてから使う。不正なら null */
+export function parseAction(v: unknown): Action | null {
+  if (!v || typeof v !== 'object') return null;
+  const a = v as Record<string, unknown>;
+  switch (a.type) {
+    case 'lpAdd':
+      return isSeat(a.seat) && isInt(a.delta, -LP_MAX, LP_MAX) ? { type: a.type, seat: a.seat, delta: a.delta } : null;
+    case 'lpSet':
+      return isSeat(a.seat) && isInt(a.value, 0, LP_MAX) ? { type: a.type, seat: a.seat, value: a.value } : null;
+    case 'lpHalve':
+    case 'setTurnPlayer':
+      return isSeat(a.seat) ? { type: a.type, seat: a.seat } : null;
+    case 'setPhase':
+      return PHASES.includes(a.phase as Phase) ? { type: a.type, phase: a.phase as Phase } : null;
+    case 'chainAdd':
+      return isText(a.card, 200) ? { type: a.type, card: a.card } : null;
+    case 'rename':
+      return isText(a.name, 100) ? { type: a.type, name: a.name } : null;
+    case 'nextPhase':
+    case 'endTurn':
+    case 'chainResolve':
+    case 'chainClear':
+    case 'coin':
+    case 'dice':
+    case 'resetDuel':
+    case 'undo':
+      return { type: a.type };
+    default:
+      return null;
   }
 }
 

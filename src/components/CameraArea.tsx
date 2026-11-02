@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { displayName, type GameState, type Seat } from '../game/state';
+import { displayName, other, type GameState, type Seat } from '../game/state';
 import { listCameras, openCamera, stopStream, TEST_PATTERN_ID } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
@@ -7,7 +7,8 @@ import { StreamVideo, ZoomView } from './ZoomView';
 
 /** 相手の映像(複数あればタブで切り替え)を大きく表示する */
 export function OpponentCams({ view, client, me, state }: { view: View; client: RoomClient; me: Seat; state: GameState }) {
-  const cams = view.cams.filter((c) => c.seat !== me);
+  // 席が確定していない映像は、相手のものとして扱わない
+  const cams = view.cams.filter((c) => c.seat === other(me));
   const [selected, setSelected] = useState<string | null>(null);
   const cam = cams.find((c) => c.peerId === selected) ?? cams[0];
 
