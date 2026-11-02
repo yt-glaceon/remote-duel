@@ -8,7 +8,7 @@ import { StatusPill, Toast } from './common';
 /** スマホなどをカメラ専用の端末としてルームに参加させる画面 */
 export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
   // 映像の向きは端末ごとに覚えておき、接続したらホストへ伝える
-  const [rotate, setRotate] = useState(() => toRotation(loadCamRotate()));
+  const [initialRotate] = useState(() => toRotation(loadCamRotate()));
   const [view, client] = useRoom({
     room,
     isHost: false,
@@ -16,8 +16,11 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
     name: loadName(),
     clientId: getClientId(),
     camKey,
-    rotate,
+    rotate: initialRotate,
   });
+  // 持ち主が PC から変えた向きも、ここに届く
+  const rotate = view.rotate;
+  useEffect(() => saveCamRotate(rotate), [rotate]);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
@@ -57,12 +60,7 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
   // インカメと外カメの切り替え。端末によってはカメラの一覧に出ないので、向きで指定して開く
   const flip = () => void start(undefined, facing === 'environment' ? 'user' : 'environment');
 
-  const turn = () => {
-    const r = nextRotation(rotate);
-    setRotate(r);
-    saveCamRotate(r);
-    client.setRotate(r);
-  };
+  const turn = () => client.setRotate(nextRotation(rotate));
 
   // 全画面にして横向きに固定する。iPhone など固定できない端末では、手で横に持ってもらう
   const toggleLandscape = async () => {

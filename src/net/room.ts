@@ -58,6 +58,8 @@ export type View = {
   localStream: MediaStream | null;
   snaps: Snap[];
   snapBusy: boolean;
+  /** カメラ端末が送っている映像の向き(カメラ端末だけが使う) */
+  rotate: Rotation;
   notice: { id: number; text: string } | null;
 };
 
@@ -90,8 +92,10 @@ type RoomMsg =
   | { t: 'kicked' }
   /** プレイヤーがカメラ用の合言葉を作り直した */
   | { t: 'camKey'; camKey: string }
-  /** カメラ端末が映像の向きを変えた */
-  | { t: 'rotate'; rotate: Rotation };
+  /** カメラ端末が映像の向きを変えた。ホストからカメラ端末へは、持ち主が PC で変えた向きを伝える */
+  | { t: 'rotate'; rotate: Rotation }
+  /** 持ち主が、自分のカメラ端末の向きを PC から変える */
+  | { t: 'camRotate'; peerId: string; rotate: Rotation };
 
 type CamMsg =
   | { t: 'snapReq'; reqId: string }
@@ -168,6 +172,7 @@ export class RoomClient {
       localStream: null,
       snaps: [],
       snapBusy: false,
+      rotate: this.camRotate,
       notice: null,
     };
   }
@@ -404,6 +409,13 @@ export class RoomClient {
       case 'notice':
         if (typeof msg.text === 'string') this.notify(msg.text.slice(0, 100));
         break;
+      case 'rotate':
+        // 持ち主が PC で向きを変えた。ホストへは送り返さない
+        if (this.o.role === 'camera') {
+          this.camRotate = toRotation(msg.rotate);
+          this.set({ rotate: this.camRotate });
+        }
+        break;
     }
   }
 
@@ -495,11 +507,12 @@ export class RoomClient {
     } else if (msg.t === 'rotate') {
       // 向きを変えられるのはカメラ端末だけ。値は 0・90・180・270 に限る
       const m = this.memberMap.get(conn.peer);
-      const rotate = toRotation(msg.rotate);
-      if (m?.camera && rotate !== m.rotate) {
-        m.rotate = rotate;
-        this.publishMembers();
-      }
+      if (m?.camera) this.applyCamRotate(m, toRotation(msg.rotate), false);
+    } else if (msg.t === 'camRotate') {
+      // PC から向きを変えられるのは、そのカメラ端末の持ち主(合言葉を作った人)だけ
+      const m = this.memberMap.get(conn.peer);
+      const cam = typeof msg.peerId === 'string' ? this.memberMap.get(msg.peerId) : undefined;
+      if (m && !m.camera && cam?.camera && cam.owner === m.clientId) this.applyCamRotate(cam, toRotation(msg.rotate), true);
     } else if (msg.t === 'intent') {
       const m = this.memberMap.get(conn.peer);
       const seat = m && !m.camera ? seatOf(st, m.clientId) : null;
@@ -570,7 +583,25 @@ export class RoomClient {
   /** カメラ端末から、送っている映像の向きを伝える */
   setRotate(rotate: Rotation) {
     this.camRotate = rotate;
+    this.set({ rotate });
     if (this.hostConn) this.send(this.hostConn, { t: 'rotate', rotate });
+  }
+
+  /** 持ち主の PC から、自分のカメラ端末の映像の向きを変える */
+  rotateCam(peerId: string, rotate: Rotation) {
+    if (this.o.isHost) {
+      const cam = this.memberMap.get(peerId);
+      if (cam?.camera && cam.owner === this.o.clientId) this.applyCamRotate(cam, rotate, true);
+    } else if (this.hostConn) this.send(this.hostConn, { t: 'camRotate', peerId, rotate });
+  }
+
+  /** カメラ端末の向きを変えて全員に配る。PC から変えたときは、カメラ端末にも伝えて表示を合わせる */
+  private applyCamRotate(cam: Member, rotate: Rotation, tellCamera: boolean) {
+    if (rotate === cam.rotate) return;
+    cam.rotate = rotate;
+    const conn = this.roomConns.get(cam.peerId);
+    if (tellCamera && conn) this.send(conn, { t: 'rotate', rotate });
+    this.publishMembers();
   }
 
   requestSeat(to: Seat | null) {

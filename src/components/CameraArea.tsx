@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { displayName, type GameState, type Seat } from '../game/state';
-import { listCameras, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
+import { listCameras, nextRotation, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
 import { Rotated, StreamVideo, ZoomView } from './ZoomView';
@@ -46,7 +46,7 @@ export function OpponentCams({
                 <StreamVideo stream={cam.stream} className="video-fit" />
               </Rotated>
             </ZoomView>
-            {me && <SelfPip feeds={selfFeeds(view, me)} />}
+            {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
           </div>
           <div className="row stage-tools">
             <span className="muted small">
@@ -66,7 +66,7 @@ export function OpponentCams({
               {watching ? 'プレイヤーがカメラを開始すると、ここに表示されます' : '相手がカメラを開始すると、ここに表示されます'}
             </p>
           </div>
-          {me && <SelfPip feeds={selfFeeds(view, me)} />}
+          {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
         </div>
       )}
     </div>
@@ -78,8 +78,10 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
-  const [open, setOpen] = useState<SelfFeed | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const stream = view.localStream;
+  const feeds = selfFeeds(view, me);
+  const open = feeds.find((f) => f.id === openId);
 
   useEffect(() => {
     void listCameras().then(setDevices).catch(() => {});
@@ -126,21 +128,42 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
       </select>
       {error && <p className="error small">{error}</p>}
       <div className="thumbs">
-        {selfFeeds(view, me).map((f) => (
-          <figure key={f.id} className="clickable" onClick={() => setOpen(f)} title="クリックで大きく表示">
+        {feeds.map((f) => (
+          <figure key={f.id} className="clickable" onClick={() => setOpenId(f.id)} title="クリックで大きく表示">
             <Rotated rotate={f.rotate} className="thumb-video">
               <StreamVideo stream={f.stream} className="video-fit" />
             </Rotated>
-            <figcaption className="muted small">{f.label}</figcaption>
+            <figcaption className="muted small">
+              {f.label}
+              <RotateButton feed={f} client={client} />
+            </figcaption>
           </figure>
         ))}
       </div>
-      {open && <FeedModal feed={open} onClose={() => setOpen(null)} />}
+      {open && <FeedModal feed={open} client={client} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
 
+/** id はこの PC のカメラなら 'local'、スマホのカメラ端末ならその peerId */
 type SelfFeed = { id: string; label: string; rotate: Rotation; stream: MediaStream };
+
+/** 自分のスマホの映像を、PC から回す。向きは全員の画面とスマホの画面に反映される */
+function RotateButton({ feed, client }: { feed: SelfFeed; client: RoomClient }) {
+  if (feed.id === 'local') return null;
+  return (
+    <button
+      className="small-btn"
+      title="スマホの映像を 90° 回す(相手や観戦者の画面にも反映されます)"
+      onClick={(e) => {
+        e.stopPropagation();
+        client.rotateCam(feed.id, nextRotation(feed.rotate));
+      }}
+    >
+      ↻ {feed.rotate}°
+    </button>
+  );
+}
 
 /** 自分が相手に送っている映像(この PC のカメラと、自分の席のスマホカメラ) */
 export function selfFeeds(view: View, me: Seat): SelfFeed[] {
@@ -150,7 +173,7 @@ export function selfFeeds(view: View, me: Seat): SelfFeed[] {
   return feeds;
 }
 
-function FeedModal({ feed, onClose }: { feed: SelfFeed; onClose: () => void }) {
+function FeedModal({ feed, client, onClose }: { feed: SelfFeed; client: RoomClient; onClose: () => void }) {
   return (
     <Modal wide onClose={onClose}>
       <h2>あなたのカメラ({feed.label})</h2>
@@ -159,20 +182,24 @@ function FeedModal({ feed, onClose }: { feed: SelfFeed; onClose: () => void }) {
           <StreamVideo stream={feed.stream} className="video-fit" />
         </Rotated>
       </ZoomView>
-      <p className="muted small">相手に送っている映像です。盤面が映っているか、文字が読めるかを確かめられます。</p>
+      <div className="row">
+        <p className="muted small">相手に送っている映像です。盤面が映っているか、文字が読めるかを確かめられます。</p>
+        <RotateButton feed={feed} client={client} />
+      </div>
     </Modal>
   );
 }
 
 /** 相手の映像の隅に、自分のカメラを小さく重ねて表示する。クリックで大きく表示する */
-function SelfPip({ feeds }: { feeds: SelfFeed[] }) {
-  const [open, setOpen] = useState<SelfFeed | null>(null);
+function SelfPip({ feeds, client }: { feeds: SelfFeed[]; client: RoomClient }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = feeds.find((f) => f.id === openId);
   if (feeds.length === 0) return null;
   return (
     <>
       <div className="self-pip" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
         {feeds.map((f) => (
-          <button key={f.id} className="self-pip-item" onClick={() => setOpen(f)} title="クリックで大きく表示">
+          <button key={f.id} className="self-pip-item" onClick={() => setOpenId(f.id)} title="クリックで大きく表示">
             <Rotated rotate={f.rotate}>
               <StreamVideo stream={f.stream} className="video-fit" />
             </Rotated>
@@ -180,7 +207,7 @@ function SelfPip({ feeds }: { feeds: SelfFeed[] }) {
           </button>
         ))}
       </div>
-      {open && <FeedModal feed={open} onClose={() => setOpen(null)} />}
+      {open && <FeedModal feed={open} client={client} onClose={() => setOpenId(null)} />}
     </>
   );
 }

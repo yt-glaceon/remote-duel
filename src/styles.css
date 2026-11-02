@@ -247,6 +247,13 @@ input {
 .thumbs figure {
   margin: 0;
 }
+.thumbs figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 2px;
+}
 .thumb-video {
   width: 160px;
   aspect-ratio: 16 / 9;
