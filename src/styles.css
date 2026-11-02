@@ -497,3 +497,32 @@ input {
 .lp-preview.error {
   color: #ff9a92;
 }
+.badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.badge-sub {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0 6px;
+}
+.first-player {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.first-player button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.first-player .active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1400;
+  font-weight: 600;
+}

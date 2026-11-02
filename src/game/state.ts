@@ -27,6 +27,8 @@ export type GameState = {
   players: Record<Seat, Player>;
   turn: number;
   turnPlayer: Seat;
+  /** 先攻のプレイヤー。奇数ターンが先攻、偶数ターンが後攻のターン */
+  firstPlayer: Seat;
   phase: Phase;
   chain: ChainLink[];
   log: LogEntry[];
@@ -41,6 +43,7 @@ export type Action =
   | { type: 'nextPhase' }
   | { type: 'endTurn' }
   | { type: 'setTurnPlayer'; seat: Seat }
+  | { type: 'setFirstPlayer'; seat: Seat }
   | { type: 'chainAdd'; card: string }
   | { type: 'chainResolve' }
   | { type: 'chainClear' }
@@ -63,6 +66,7 @@ export function initialState(): GameState {
     },
     turn: 1,
     turnPlayer: 'p1',
+    firstPlayer: 'p1',
     phase: 'DP',
     chain: [],
     log: [],
@@ -132,6 +136,12 @@ function step(st: GameState, a: Action, by: Seat): GameState {
     case 'setTurnPlayer':
       if (a.seat === st.turnPlayer) return st;
       return appendLog({ ...st, turnPlayer: a.seat }, by, `ターンプレイヤーを${displayName(st, a.seat)}に変更`);
+    case 'setFirstPlayer': {
+      if (a.seat === st.firstPlayer) return st;
+      // 途中で変えても、いまのターン数に合ったターンプレイヤーにそろえる
+      const turnPlayer = st.turn % 2 === 1 ? a.seat : other(a.seat);
+      return appendLog({ ...st, firstPlayer: a.seat, turnPlayer }, by, `先攻: ${displayName(st, a.seat)}`);
+    }
     case 'chainAdd': {
       const card = a.card.trim().slice(0, 60);
       if (!card || st.chain.length >= CHAIN_MAX) return st;
@@ -166,9 +176,9 @@ function step(st: GameState, a: Action, by: Seat): GameState {
         p2: { ...st.players.p2, lp: START_LP },
       };
       return appendLog(
-        { ...st, players, turn: 1, turnPlayer: 'p1', phase: 'DP', chain: [], lastRoll: null },
+        { ...st, players, turn: 1, turnPlayer: st.firstPlayer, phase: 'DP', chain: [], lastRoll: null },
         by,
-        '新しいデュエルを開始(LP 8000)',
+        `新しいデュエルを開始(LP 8000、先攻: ${displayName(st, st.firstPlayer)})`,
       );
     }
     case 'undo':
@@ -192,6 +202,7 @@ export function parseAction(v: unknown): Action | null {
       return isSeat(a.seat) && isInt(a.value, 0, LP_MAX) ? { type: a.type, seat: a.seat, value: a.value } : null;
     case 'lpHalve':
     case 'setTurnPlayer':
+    case 'setFirstPlayer':
       return isSeat(a.seat) ? { type: a.type, seat: a.seat } : null;
     case 'setPhase':
       return PHASES.includes(a.phase as Phase) ? { type: a.type, phase: a.phase as Phase } : null;
@@ -224,7 +235,8 @@ export function loadState(room: string): GameState | null {
   try {
     const raw = localStorage.getItem(storageKey(room));
     const v = raw ? JSON.parse(raw) : null;
-    return isGameState(v) ? v : null;
+    // 先攻の項目がない古い保存データは、プレイヤー1を先攻として読み込む
+    return isGameState(v) ? { ...v, firstPlayer: isSeat(v.firstPlayer) ? v.firstPlayer : 'p1' } : null;
   } catch {
     return null;
   }

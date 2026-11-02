@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseLpInput, type LpOp } from '../game/lpInput';
-import { displayName, PHASE_LABEL, PHASES, type Action, type GameState, type Seat } from '../game/state';
+import { displayName, PHASE_LABEL, PHASES, SEATS, type Action, type GameState, type Seat } from '../game/state';
 
 type Props = { state: GameState; me: Seat; dispatch: (a: Action) => void; readOnly: boolean };
 
@@ -52,7 +52,10 @@ export function LpCard({ state, seat, isMe, dispatch, readOnly }: Props & { seat
             {isMe && <small> (あなた)</small>}
           </span>
         )}
-        {state.turnPlayer === seat && <span className="badge">ターン</span>}
+        <span className="badges">
+          <span className="badge-sub">{state.firstPlayer === seat ? '先攻' : '後攻'}</span>
+          {state.turnPlayer === seat && <span className="badge">ターン</span>}
+        </span>
       </div>
       <div className={`lp-value ${flash ?? ''} ${p.lp === 0 ? 'zero' : ''}`}>{p.lp}</div>
       {!readOnly && (
@@ -101,6 +104,19 @@ export function TurnBar({ state, dispatch, readOnly, canUndo }: Props & { canUnd
       <div className="panel-head">
         <strong>ターン {state.turn}</strong>
         <span className="muted">{displayName(state, state.turnPlayer)}のターン</span>
+      </div>
+      <div className="first-player">
+        <span className="muted small">先攻</span>
+        {SEATS.map((s) => (
+          <button
+            key={s}
+            className={state.firstPlayer === s ? 'active' : ''}
+            disabled={readOnly}
+            onClick={() => dispatch({ type: 'setFirstPlayer', seat: s })}
+          >
+            {displayName(state, s)}
+          </button>
+        ))}
       </div>
       <div className="phases">
         {PHASES.map((ph) => (
