@@ -6,13 +6,14 @@ export const other = (s: Seat): Seat => (s === 'p1' ? 'p2' : 'p1');
 
 export type Phase = 'DP' | 'SP' | 'M1' | 'BP' | 'M2' | 'EP';
 export const PHASES: Phase[] = ['DP', 'SP', 'M1', 'BP', 'M2', 'EP'];
+// 公式ルールブックの表記に合わせる
 export const PHASE_LABEL: Record<Phase, string> = {
-  DP: 'ドロー',
-  SP: 'スタンバイ',
-  M1: 'メイン1',
-  BP: 'バトル',
-  M2: 'メイン2',
-  EP: 'エンド',
+  DP: 'ドローフェイズ',
+  SP: 'スタンバイフェイズ',
+  M1: 'メインフェイズ1',
+  BP: 'バトルフェイズ',
+  M2: 'メインフェイズ2',
+  EP: 'エンドフェイズ',
 };
 
 export const START_LP = 8000;
@@ -117,12 +118,14 @@ function step(st: GameState, a: Action, by: Seat): GameState {
       return setLp(st, a.seat, Math.ceil(st.players[a.seat].lp / 2), by);
     case 'setPhase':
       if (a.phase === st.phase) return st;
-      return appendLog({ ...st, phase: a.phase }, by, `${PHASE_LABEL[a.phase]}フェイズ`);
+      return appendLog({ ...st, phase: a.phase }, by, PHASE_LABEL[a.phase]);
     case 'nextPhase': {
       const i = PHASES.indexOf(st.phase);
       if (i === PHASES.length - 1) return step(st, { type: 'endTurn' }, by);
-      const phase = PHASES[i + 1];
-      return appendLog({ ...st, phase }, by, `${PHASE_LABEL[phase]}フェイズ`);
+      // 先攻の1ターン目はバトルフェイズを行えず、バトルフェイズを行わないときはメインフェイズ2もない。
+      // 止めはしないので、必要ならフェイズのボタンで直接選べる
+      const phase = st.phase === 'M1' && st.turn === 1 ? 'EP' : PHASES[i + 1];
+      return appendLog({ ...st, phase }, by, PHASE_LABEL[phase]);
     }
     case 'endTurn': {
       const turnPlayer = other(st.turnPlayer);

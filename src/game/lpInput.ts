@@ -91,8 +91,8 @@ export function parseLpInput(raw: string, mode?: LpOp['kind']): LpOp | null {
   }
   const v = evaluate(s);
   if (v === null) return null;
-  // 端数は切り上げ(LP 半分のときと同じ扱い)
-  const amount = Math.ceil(Math.abs(v) - 1e-9);
+  // 端数は四捨五入して整数にする(公式 Q&A の扱い)
+  const amount = Math.round(Math.abs(v));
   if (amount > MAX) return null;
   return { kind: mode ?? kind, amount };
 }

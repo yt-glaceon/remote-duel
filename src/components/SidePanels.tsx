@@ -103,7 +103,9 @@ export function TurnBar({ state, dispatch, readOnly, canUndo }: Props & { canUnd
     <div className="panel">
       <div className="panel-head">
         <strong>ターン {state.turn}</strong>
-        <span className="muted">{displayName(state, state.turnPlayer)}のターン</span>
+        <span className="muted">
+          {displayName(state, state.turnPlayer)}のターン・{PHASE_LABEL[state.phase]}
+        </span>
       </div>
       <div className="first-player">
         <span className="muted small">先攻</span>
@@ -125,7 +127,7 @@ export function TurnBar({ state, dispatch, readOnly, canUndo }: Props & { canUnd
             className={ph === state.phase ? 'active' : ''}
             disabled={readOnly}
             onClick={() => dispatch({ type: 'setPhase', phase: ph })}
-            title={`${PHASE_LABEL[ph]}フェイズ`}
+            title={PHASE_LABEL[ph]}
           >
             {ph}
           </button>
