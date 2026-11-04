@@ -55,7 +55,11 @@ export function OpponentCams({
             <span className="muted small">
               {cam.seat ? displayName(state, cam.seat) : '相手'}の{cam.label}
             </span>
-            <span className="muted small stage-hint">ホイールで拡大・ドラッグで移動・ダブルクリックで戻す</span>
+            <span className="muted small stage-hint">
+              <span>ホイールで拡大</span>
+              <span>ドラッグで移動</span>
+              <span>ダブルクリックで戻す</span>
+            </span>
             <span className="spacer" />
             <button disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
               {view.snapBusy ? '撮影中…' : '高画質で撮る'}
@@ -206,7 +210,7 @@ function SelfPip({ feeds, client }: { feeds: SelfFeed[]; client: RoomClient }) {
             <Rotated rotate={f.rotate}>
               <StreamVideo stream={f.stream} className="video-fit" />
             </Rotated>
-            <span className="self-pip-label">自分・{f.label}</span>
+            <span className="self-pip-label">{f.label}</span>
           </button>
         ))}
       </div>

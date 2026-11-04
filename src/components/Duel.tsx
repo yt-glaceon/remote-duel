@@ -311,8 +311,9 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
 
   return (
     <div className="tab-sec seats">
-      <p className="muted small">
-        参加者 {people}人{free ? '・席を入れ替えできます' : ''}
+      <p className="muted small meta-row">
+        <span>参加者 {people}人</span>
+        {free && <span>席を入れ替えできます</span>}
       </p>
       {SEATS.map((s) => {
         const holder = view.members.find((m) => m.role === 'player' && m.seat === s);

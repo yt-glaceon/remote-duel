@@ -1,26 +1,30 @@
 /*
- * 方針: 映像が主役の道具。
- * - 無彩色にする。カードの色の見え方を画面の色に左右させないため。色は席の印と LP の増減、警告にだけ使う
- * - 強調は白の塗りだけにして、1つの場面に1つ置く。枠で囲まず、線で区切る
- * - 数字と記号は等幅、本文は端末の日本語フォント
+ * 方針: 映像が主役の道具で、LP だけを目立たせる。
+ * - 映像は黒、まわりは明るめのグラファイトにして、映像の枠を分ける。カードの色を邪魔しないよう無彩色にする
+ * - 色は席の印、LP の増減、警告にだけ使う。強調は白の塗り
+ * - LP はデュエルの電卓に合わせた7セグメント(SevenSeg)。それ以外の数字は本文の書体で桁をそろえる
+ * - 区切りは線より余白と面の明るさで作る
  */
 :root {
-  --bg: #0c0c0d;
-  --panel: #141415;
-  --panel-2: #1f1f21;
-  --line: #2b2b2e;
-  --line-2: #47474c;
-  --text: #ececea;
-  --muted: #92928e;
-  --invert: #ececea;
-  --invert-text: #0c0c0d;
-  --p1: #4ea1ff;
-  --p2: #ff8a3d;
-  --danger: #ff5a4f;
-  --ok: #4cc38a;
-  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --bg: #1b1c1e;
+  --panel: #25272a;
+  --panel-2: #303337;
+  --well: #121314;
+  --well-2: #1c1e20;
+  --line: #3a3d41;
+  --line-2: #55585d;
+  --text: #f1f0ec;
+  --muted: #a6a8a6;
+  --invert: #f1f0ec;
+  --invert-text: #17181a;
+  --p1: #5aa9ff;
+  --p2: #ff9148;
+  --danger: #ff6a5e;
+  --ok: #5ccf97;
   color-scheme: dark;
-  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Noto Sans JP', system-ui, sans-serif;
+  /* BIZ UDPGothic は小さい文字でも読みやすい。Windows 以外は端末の日本語フォントを使う */
+  font-family: 'BIZ UDPGothic', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 * {
@@ -49,8 +53,7 @@ h2 {
 }
 code,
 time {
-  font-family: var(--mono);
-  font-weight: 500;
+  font-family: inherit;
 }
 
 button,
@@ -61,12 +64,12 @@ select {
   color: inherit;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 3px;
   padding: 5px 10px;
 }
 input,
 select {
-  background: var(--bg);
+  background: var(--well);
 }
 input:focus-visible,
 select:focus-visible,
@@ -107,7 +110,7 @@ input {
   width: 100%;
 }
 input::placeholder {
-  color: #6e6e72;
+  color: #8f9193;
 }
 
 .muted {
@@ -162,7 +165,7 @@ input::placeholder {
   gap: 12px;
   align-items: center;
   padding: 7px 12px;
-  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
 .pill {
   font-size: 12px;
@@ -217,15 +220,13 @@ input::placeholder {
   flex-direction: column;
   overflow-y: auto;
   background: var(--panel);
-  border-left: 1px solid var(--line);
 }
 .rail-sec {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 12px 6px;
 }
 .rail-sec h3 {
   font-size: 12px;
@@ -233,7 +234,6 @@ input::placeholder {
   color: var(--muted);
 }
 .rail-sec h3 span {
-  font-family: var(--mono);
   color: var(--text);
 }
 
@@ -295,21 +295,23 @@ input::placeholder {
 .zoom-controls button {
   background: rgba(0, 0, 0, 0.65);
   min-width: 34px;
-  font-family: var(--mono);
 }
 .stage-tools {
   flex: none;
   gap: 12px;
   padding: 5px 12px;
-  background: var(--bg);
-  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.stage-hint {
+  display: flex;
+  gap: 12px;
 }
 .tabs {
   flex: none;
   display: flex;
   gap: 2px;
   padding: 4px;
-  background: var(--bg);
+  background: var(--panel);
 }
 .tabs .active,
 .phases .active,
@@ -367,7 +369,7 @@ input::placeholder {
 .snap-strip {
   flex: none;
   padding: 4px 12px 6px;
-  background: var(--bg);
+  background: var(--panel);
 }
 .snaps {
   display: flex;
@@ -392,21 +394,21 @@ input::placeholder {
 /* LP */
 .lp-board {
   flex: none;
-  border-bottom: 1px solid var(--line);
 }
 .lp-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  background: var(--well);
 }
 .lp-row:has(.lp-pick) {
   cursor: pointer;
 }
 .lp-row.selected {
-  background: var(--panel-2);
+  background: var(--well-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .lp-who {
   min-width: 0;
@@ -442,12 +444,18 @@ input::placeholder {
   border: 0;
 }
 .lp-value {
-  font-family: var(--mono);
-  font-size: 38px;
-  font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
+  display: block;
+  color: var(--text);
   transition: color 0.3s;
+}
+.seven-seg {
+  display: block;
+  height: 42px;
+  width: auto;
+  fill: currentColor;
+}
+.seg-off {
+  opacity: 0.07;
 }
 .lp-value.down {
   color: var(--danger);
@@ -470,11 +478,7 @@ input::placeholder {
 .chips button {
   flex: 1;
   padding: 3px;
-  font-family: var(--mono);
   font-size: 12px;
-}
-.chips button:last-child {
-  font-family: inherit;
 }
 .lp-preview {
   display: flex;
@@ -500,7 +504,6 @@ input::placeholder {
   font-size: 12px;
 }
 .turn-no b {
-  font-family: var(--mono);
   font-size: 18px;
   color: var(--text);
 }
@@ -523,7 +526,6 @@ input::placeholder {
 }
 .phases button {
   padding: 4px 0;
-  font-family: var(--mono);
   font-size: 12px;
 }
 .turn-actions button:first-child {
@@ -541,8 +543,7 @@ input::placeholder {
 .chain li {
   display: flex;
   align-items: center;
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 2px 0;
 }
 .chain li.resolved {
   opacity: 0.45;
@@ -553,7 +554,6 @@ input::placeholder {
 .chain-no {
   width: 22px;
   flex: none;
-  font-family: var(--mono);
   font-weight: 600;
 }
 .chain-card {
@@ -568,7 +568,6 @@ input::placeholder {
   align-items: center;
   padding: 6px 12px;
   background: var(--panel-2);
-  border-bottom: 1px solid var(--line);
 }
 .roll-flash b {
   margin-left: auto;
@@ -622,11 +621,12 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 12px 2px;
 }
-.tab-sec:last-child {
-  border-bottom: 0;
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
 }
 .duel-tab {
   display: flex;
@@ -634,7 +634,7 @@ input::placeholder {
 }
 .duel-tab.result-first .result-panel {
   order: -1;
-  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
 }
 .first-player {
   display: grid;
@@ -679,14 +679,13 @@ input::placeholder {
 .log {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 6px 0;
   font-size: 13px;
 }
 .log li {
   display: flex;
   align-items: baseline;
-  padding: 3px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 2px 12px;
 }
 .log time {
   flex: none;
@@ -750,7 +749,6 @@ input::placeholder {
 .seat-label {
   width: 32px;
   flex: none;
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--muted);
 }
@@ -780,19 +778,25 @@ input::placeholder {
   flex-direction: column;
   gap: 12px;
 }
+.lobby-lp {
+  align-self: flex-start;
+  height: 96px;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+.lobby-lp .seg-off {
+  opacity: 0.05;
+}
 .lobby h1 {
-  font-size: 34px;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
+  font-size: 20px;
+  line-height: 1.3;
 }
 .lobby-lead {
   color: var(--muted);
   margin-bottom: 20px;
 }
 .lobby-join {
-  margin-top: 28px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
+  margin-top: 32px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -866,6 +870,12 @@ input::placeholder {
   z-index: 20;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .lp-value {
+    transition: none;
+  }
+}
+
 /* 狭い画面では縦に積み、ページをスクロールさせる */
 @media (max-width: 900px) {
   .app {
@@ -893,6 +903,11 @@ input::placeholder {
     box-sizing: border-box;
     max-width: none;
     padding: 48px 24px;
+  }
+  .lobby-lp {
+    height: auto;
+    width: 100%;
+    max-width: 320px;
   }
 }
 

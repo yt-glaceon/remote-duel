@@ -120,8 +120,11 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
         {view.detail && <p className="muted small cam-detail">{view.detail}</p>}
         {stream ? (
           <>
-            <p className="muted">
-              送信中 {settings?.width}×{settings?.height} ・ 視聴者 {viewers} 人
+            <p className="muted meta-row">
+              <span>
+                送信中 {settings?.width}×{settings?.height}
+              </span>
+              <span>視聴者 {viewers}人</span>
             </p>
             <div className="cam-actions">
               <button onClick={turn}>映像を回す({rotate}°)</button>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseLpInput, type LpOp } from '../game/lpInput';
 import { displayName, other, PHASE_LABEL, PHASES, SEATS, type Action, type GameState, type Seat } from '../game/state';
+import { SevenSeg } from './SevenSeg';
 
 type Props = { state: GameState; me: Seat; dispatch: (a: Action) => void; readOnly: boolean };
 
@@ -34,6 +35,33 @@ export function LpBoard({ state, me, dispatch, readOnly }: Props) {
   );
 }
 
+/** LP が変わったとき、電卓の数字のように数えながら新しい値へ動かす。動きを減らす設定なら、すぐ切り替える */
+function useCountedLp(target: number) {
+  const [shown, setShown] = useState(target);
+  const current = useRef(target);
+  useEffect(() => {
+    const start = current.current;
+    if (start === target) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      current.current = target;
+      setShown(target);
+      return;
+    }
+    const begin = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const k = Math.min(1, (now - begin) / 700);
+      const v = Math.round(start + (target - start) * (1 - (1 - k) ** 3));
+      current.current = v;
+      setShown(v);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return shown;
+}
+
 function LpRow({
   state,
   seat,
@@ -53,6 +81,7 @@ function LpRow({
   const [editingName, setEditingName] = useState(false);
   const [flash, setFlash] = useState<'down' | 'up' | null>(null);
   const prevLp = useRef(p.lp);
+  const shown = useCountedLp(p.lp);
 
   useEffect(() => {
     if (p.lp === prevLp.current) return;
@@ -62,7 +91,11 @@ function LpRow({
     return () => clearTimeout(t);
   }, [p.lp]);
 
-  const value = <span className={`lp-value ${flash ?? ''} ${p.lp === 0 ? 'zero' : ''}`}>{p.lp}</span>;
+  const value = (
+    <span className={`lp-value ${flash ?? ''} ${p.lp === 0 ? 'zero' : ''}`} role="img" aria-label={`LP ${p.lp}`}>
+      <SevenSeg value={shown} />
+    </span>
+  );
 
   return (
     <div className={`lp-row ${selected ? 'selected' : ''}`} onClick={onSelect}>
@@ -135,7 +168,7 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
-          placeholder={`${name}へ 2400*2`}
+          placeholder={`${name}の LP`}
           title="数字か式(+ - * / と括弧)。Enter はダメージ。先頭に + で回復、= で値の指定"
         />
         <button onClick={() => submit('damage')} className="danger">

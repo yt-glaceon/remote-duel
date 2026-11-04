@@ -29,10 +29,12 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
 
   return (
     <div className={`tab-sec result-panel ${!r && zero.length > 0 ? 'alert' : ''}`}>
-      <p className="muted small">
-        デュエル {state.duelNo}・通算{' '}
-        {rec.wins.length === 0 && rec.draws === 0 ? 'なし' : rec.wins.map((w) => `${w.name} ${w.wins}勝`).join('・')}
-        {rec.draws > 0 && `(引き分け ${rec.draws})`}
+      <p className="muted small meta-row">
+        <span>デュエル {state.duelNo}</span>
+        <span>
+          通算 {rec.wins.length === 0 && rec.draws === 0 ? 'なし' : rec.wins.map((w) => `${w.name} ${w.wins}勝`).join('、')}
+          {rec.draws > 0 && `(引き分け ${rec.draws})`}
+        </span>
       </p>
 
       {r ? (

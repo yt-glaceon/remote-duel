@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { getClientId, loadName, saveName, shortRoom } from '../identity';
 import { createHostKey } from '../net/hostKey';
+import { SevenSeg } from './SevenSeg';
 
 /** 招待リンクを開いた人が、対戦するか観戦するかを選ぶ画面 */
 export function JoinChoice({ room }: { room: string }) {
@@ -11,6 +12,7 @@ export function JoinChoice({ room }: { room: string }) {
   };
   return (
     <main className="lobby">
+      <SevenSeg value={8000} className="lobby-lp" />
       <h1>リモートデュエル</h1>
       <p className="lobby-lead">
         ルーム <code>{shortRoom(room)}</code> への招待
@@ -62,6 +64,7 @@ export function Lobby({ invalidLink = false }: { invalidLink?: boolean }) {
 
   return (
     <main className="lobby">
+      <SevenSeg value={8000} className="lobby-lp" />
       <h1>リモートデュエル</h1>
       <p className="lobby-lead">手元のカードをカメラに映して、離れた相手と対戦する。</p>
       {invalidLink && <p className="error">このリンクは使えません。古い形式のリンクの場合は、ホストに新しい招待リンクをもらってください。</p>}
