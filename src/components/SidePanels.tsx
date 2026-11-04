@@ -60,6 +60,43 @@ function useCountedLp(target: number) {
   return shown;
 }
 
+/** 表示中の LP と、直前の増減。増減は変わった直後の少しの間だけ返す */
+function useLpDisplay(lp: number) {
+  const shown = useCountedLp(lp);
+  const [change, setChange] = useState<number | null>(null);
+  const prev = useRef(lp);
+  useEffect(() => {
+    if (lp === prev.current) return;
+    setChange(lp - prev.current);
+    prev.current = lp;
+    const t = setTimeout(() => setChange(null), 1200);
+    return () => clearTimeout(t);
+  }, [lp]);
+  return { shown, change };
+}
+
+function lpClass(lp: number, change: number | null) {
+  const flash = change === null ? '' : change < 0 ? 'down' : 'up';
+  return `lp-value ${flash} ${lp === 0 ? 'zero' : ''}`;
+}
+
+/** 映像の左上に重ねる、映っている人の名前と LP。視線を映像から外さずに読めるようにする */
+export function VideoTag({ state, seat, label }: { state: GameState; seat: Seat; label: string }) {
+  const lp = state.players[seat].lp;
+  const { shown, change } = useLpDisplay(lp);
+  return (
+    <div className="video-tag">
+      <span className="video-tag-name">
+        <SeatMark seat={seat} />
+        {displayName(state, seat)}の{label}
+      </span>
+      <span className={lpClass(lp, change)} role="img" aria-label={`LP ${lp}`}>
+        <SevenSeg value={shown} />
+      </span>
+    </div>
+  );
+}
+
 function LpRow({
   state,
   seat,
@@ -72,26 +109,17 @@ function LpRow({
   onSelect?: () => void;
 }) {
   const p = state.players[seat];
-  const [flash, setFlash] = useState<'down' | 'up' | null>(null);
-  const prevLp = useRef(p.lp);
-  const shown = useCountedLp(p.lp);
-
-  useEffect(() => {
-    if (p.lp === prevLp.current) return;
-    setFlash(p.lp < prevLp.current ? 'down' : 'up');
-    prevLp.current = p.lp;
-    const t = setTimeout(() => setFlash(null), 900);
-    return () => clearTimeout(t);
-  }, [p.lp]);
+  const { shown, change } = useLpDisplay(p.lp);
+  const turn = state.turnPlayer === seat;
 
   const value = (
-    <span className={`lp-value ${flash ?? ''} ${p.lp === 0 ? 'zero' : ''}`} role="img" aria-label={`LP ${p.lp}`}>
+    <span className={lpClass(p.lp, change)} role="img" aria-label={`LP ${p.lp}`}>
       <SevenSeg value={shown} />
     </span>
   );
 
   return (
-    <div className={`lp-row ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <div className={`lp-row lp-row-${seat} ${selected ? 'selected' : ''} ${turn ? 'turn' : ''}`} onClick={onSelect}>
       <div className="lp-who">
         <span className="lp-name">
           <SeatMark seat={seat} />
@@ -99,7 +127,12 @@ function LpRow({
         </span>
         <span className="lp-meta">
           {state.firstPlayer === seat ? '先攻' : '後攻'}
-          {state.turnPlayer === seat && <b>ターン</b>}
+          {turn && <b>ターン</b>}
+          {change !== null && (
+            <span className={change < 0 ? 'lp-delta down' : 'lp-delta up'}>
+              {change < 0 ? `−${-change}` : `+${change}`}
+            </span>
+          )}
         </span>
       </div>
       {onSelect ? (
@@ -142,11 +175,13 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
           placeholder={`${name}の LP`}
           title="数字か式(+ - * / と括弧)。Enter はダメージ。先頭に + で回復、= で値の指定"
         />
-        <button onClick={() => submit('damage')} className="danger">
+        <button onClick={() => submit('damage')} className="key danger">
           ダメージ
         </button>
-        <button onClick={() => submit('heal')}>回復</button>
-        <button onClick={() => submit('set')} title="入力した値を LP にする">
+        <button className="key" onClick={() => submit('heal')}>
+          回復
+        </button>
+        <button className="key" onClick={() => submit('set')} title="入力した値を LP にする">
           指定
         </button>
       </div>
@@ -160,11 +195,13 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
       ) : (
         <div className="row chips">
           {[100, 500, 1000].map((n) => (
-            <button key={n} onClick={() => dispatch({ type: 'lpAdd', seat, delta: -n })}>
+            <button key={n} className="key" onClick={() => dispatch({ type: 'lpAdd', seat, delta: -n })}>
               −{n}
             </button>
           ))}
-          <button onClick={() => dispatch({ type: 'lpHalve', seat })}>半分</button>
+          <button className="key" onClick={() => dispatch({ type: 'lpHalve', seat })}>
+            半分
+          </button>
         </div>
       )}
     </div>
@@ -199,11 +236,13 @@ export function TurnBar({ state, dispatch, readOnly, canUndo }: Props & { canUnd
       </div>
       {!readOnly && (
         <div className="row turn-actions">
-          <button className="primary" onClick={() => dispatch({ type: 'nextPhase' })}>
+          <button className="key primary" onClick={() => dispatch({ type: 'nextPhase' })}>
             次のフェイズ
           </button>
-          <button onClick={() => dispatch({ type: 'endTurn' })}>ターン終了</button>
-          <button disabled={!canUndo} onClick={() => dispatch({ type: 'undo' })} title="直前の操作を取り消す">
+          <button className="key" onClick={() => dispatch({ type: 'endTurn' })}>
+            ターン終了
+          </button>
+          <button className="key" disabled={!canUndo} onClick={() => dispatch({ type: 'undo' })} title="直前の操作を取り消す">
             戻す
           </button>
         </div>

@@ -3,6 +3,7 @@ import { displayName, type GameState, type Seat } from '../game/state';
 import { listCameras, nextRotation, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
+import { VideoTag } from './SidePanels';
 import { Rotated, StreamVideo, ZoomView } from './ZoomView';
 
 /** 見たい席(プレイヤーなら相手、観戦者なら両方)の映像を大きく表示する。複数あればタブで切り替える */
@@ -49,21 +50,18 @@ export function OpponentCams({
                 <StreamVideo stream={cam.stream} className="video-fit" />
               </Rotated>
             </ZoomView>
+            {cam.seat && <VideoTag state={state} seat={cam.seat} label={cam.label} />}
             {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
-          </div>
-          <div className="row stage-tools">
-            <span className="muted small">
-              {cam.seat ? displayName(state, cam.seat) : '相手'}の{cam.label}
-            </span>
-            <span className="muted small stage-hint">
-              <span>ホイールで拡大</span>
-              <span>ドラッグで移動</span>
-              <span>ダブルクリックで戻す</span>
-            </span>
-            <span className="spacer" />
-            <button disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
-              {view.snapBusy ? '撮影中…' : '高画質で撮る'}
-            </button>
+            <div className="stage-tools">
+              <button disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
+                {view.snapBusy ? '撮影中…' : '高画質で撮る'}
+              </button>
+              <span className="stage-hint">
+                <span>ホイールで拡大</span>
+                <span>ドラッグで移動</span>
+                <span>ダブルクリックで戻す</span>
+              </span>
+            </div>
           </div>
         </>
       ) : (

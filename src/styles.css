@@ -4,6 +4,7 @@
  * - 色は席の印、LP の増減、警告にだけ使う。強調は白の塗り
  * - LP はデュエルの電卓に合わせた7セグメント(SevenSeg)。それ以外の数字は本文の書体で桁をそろえる
  * - 区切りは線より余白と面の明るさで作る
+ * - 映像の上の表示はカード対戦の SpellTable、手番の点灯は対局時計、押す操作は配信の操作盤を手本にする
  */
 :root {
   --bg: #1b1c1e;
@@ -194,6 +195,18 @@ input::placeholder {
   background: var(--danger);
 }
 
+/* 物理キー。押す回数の多い操作は大きく、押すと沈むようにする */
+.key {
+  min-height: 36px;
+  border-radius: 6px;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 2px 0 #101112;
+}
+.key:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: none;
+}
+
 /* 全体のレイアウト。ページは動かさず、映像が残りの高さをすべて使う */
 .duel {
   flex: 1;
@@ -296,15 +309,59 @@ input::placeholder {
   background: rgba(0, 0, 0, 0.65);
   min-width: 34px;
 }
-.stage-tools {
+/* 映像に重ねるもの。映像の面積を減らさないよう、帯にせず隅に置く */
+.video-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+}
+.video-tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.video-tag .lp-value {
   flex: none;
+}
+.video-tag .seven-seg {
+  height: 22px;
+}
+.stage-tools {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 5px 12px;
-  background: var(--panel);
+  pointer-events: none;
+}
+.stage-tools button {
+  background: rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
 }
 .stage-hint {
-  display: flex;
+  display: none;
   gap: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.65);
+}
+@media (hover: hover) and (min-width: 901px) {
+  .video-wrap:hover .stage-hint {
+    display: flex;
+  }
 }
 .tabs {
   flex: none;
@@ -400,8 +457,19 @@ input::placeholder {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 9px;
   background: var(--well);
+  border-left: 3px solid transparent;
+}
+/* 手番の側だけ点灯させる。対局時計と同じ見せ方で、どちらの手番かを LP の位置で読めるようにする */
+.lp-row-p1.turn {
+  border-left-color: var(--p1);
+}
+.lp-row-p2.turn {
+  border-left-color: var(--p2);
+}
+.lp-row:not(.turn) .lp-value:not(.down, .up) .seg-on {
+  opacity: 0.6;
 }
 .lp-row:has(.lp-pick) {
   cursor: pointer;
@@ -435,6 +503,16 @@ input::placeholder {
   background: var(--invert);
   color: var(--invert-text);
 }
+.lp-delta {
+  font-size: 13px;
+  font-weight: 600;
+}
+.lp-delta.down {
+  color: var(--danger);
+}
+.lp-delta.up {
+  color: var(--ok);
+}
 .lp-pick {
   padding: 0;
   background: none;
@@ -467,20 +545,22 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px 12px 10px;
+  padding: 8px 12px 12px;
 }
 .lp-input {
   flex: 1;
 }
+.lp-entry .row {
+  gap: 5px;
+}
 .chips button {
   flex: 1;
   padding: 3px;
-  font-size: 12px;
 }
 .lp-preview {
   display: flex;
   align-items: center;
-  min-height: 27px;
+  min-height: 38px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -524,6 +604,10 @@ input::placeholder {
 .phases button {
   padding: 4px 0;
   font-size: 12px;
+}
+.turn-actions {
+  gap: 5px;
+  padding-bottom: 2px;
 }
 .turn-actions button:first-child {
   flex: 1;
@@ -889,7 +973,8 @@ input::placeholder {
     height: auto;
     aspect-ratio: 16 / 9;
   }
-  .stage-hint {
+  /* 狭い画面では LP の行が映像のすぐ下にあるので、カードを隠さないよう重ねない */
+  .video-tag {
     display: none;
   }
   .side {
