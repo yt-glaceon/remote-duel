@@ -421,9 +421,6 @@ input::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lp-name.editable {
-  cursor: text;
-}
 .lp-meta {
   display: flex;
   gap: 6px;

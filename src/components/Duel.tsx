@@ -294,6 +294,7 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
   const free = canChangeSeats(state);
   const me = view.seat;
   const selfId = client.selfPeerId();
+  const [editingName, setEditingName] = useState(false);
   const watchers = view.members.filter((m) => m.role === 'spectator');
 
   const sit = (s: Seat, away: boolean) => {
@@ -324,7 +325,25 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
           <div key={s} className="seat-row">
             <span className="seat-label">{s === 'p1' ? 'P1' : 'P2'}</span>
             <span className="seat-name">
-              {seated ? displayName(state, s) : away ? `${state.players[s].name}(切断中)` : <span className="muted">空席</span>}
+              {seated && s === me && editingName ? (
+                <input
+                  autoFocus
+                  defaultValue={state.players[s].name}
+                  maxLength={20}
+                  aria-label="名前"
+                  onBlur={(e) => {
+                    client.dispatch({ type: 'rename', name: e.target.value });
+                    setEditingName(false);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && (e.target as HTMLInputElement).blur()}
+                />
+              ) : seated ? (
+                displayName(state, s)
+              ) : away ? (
+                `${state.players[s].name}(切断中)`
+              ) : (
+                <span className="muted">空席</span>
+              )}
               {tags(holder)}
               {cams > 0 && (
                 <span className="tag" title="この席の映像を送っているスマホ">
@@ -332,6 +351,11 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
                 </span>
               )}
             </span>
+            {seated && s === me && !editingName && (
+              <button className="small-btn" onClick={() => setEditingName(true)}>
+                名前を変更
+              </button>
+            )}
             {!seated && me !== s && (free || !me) && (
               <button className="small-btn" onClick={() => sit(s, away)}>
                 {me ? 'ここに移る' : '座る'}

@@ -24,10 +24,8 @@ export function LpBoard({ state, me, dispatch, readOnly }: Props) {
           key={s}
           state={state}
           seat={s}
-          isMe={s === me && !readOnly}
           selected={!readOnly && s === target}
           onSelect={readOnly ? undefined : () => setTarget(s)}
-          dispatch={dispatch}
         />
       ))}
       {!readOnly && <LpEntry state={state} seat={target} dispatch={dispatch} />}
@@ -65,20 +63,15 @@ function useCountedLp(target: number) {
 function LpRow({
   state,
   seat,
-  isMe,
   selected,
   onSelect,
-  dispatch,
 }: {
   state: GameState;
   seat: Seat;
-  isMe: boolean;
   selected: boolean;
   onSelect?: () => void;
-  dispatch: (a: Action) => void;
 }) {
   const p = state.players[seat];
-  const [editingName, setEditingName] = useState(false);
   const [flash, setFlash] = useState<'down' | 'up' | null>(null);
   const prevLp = useRef(p.lp);
   const shown = useCountedLp(p.lp);
@@ -100,32 +93,10 @@ function LpRow({
   return (
     <div className={`lp-row ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="lp-who">
-        {isMe && editingName ? (
-          <input
-            autoFocus
-            defaultValue={p.name}
-            maxLength={20}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={(e) => {
-              dispatch({ type: 'rename', name: e.target.value });
-              setEditingName(false);
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          />
-        ) : (
-          <span
-            className={`lp-name ${isMe ? 'editable' : ''}`}
-            onClick={(e) => {
-              if (!isMe) return;
-              e.stopPropagation();
-              setEditingName(true);
-            }}
-            title={isMe ? 'クリックで名前を変更' : ''}
-          >
-            <SeatMark seat={seat} />
-            {displayName(state, seat)}
-          </span>
-        )}
+        <span className="lp-name">
+          <SeatMark seat={seat} />
+          {displayName(state, seat)}
+        </span>
         <span className="lp-meta">
           {state.firstPlayer === seat ? '先攻' : '後攻'}
           {state.turnPlayer === seat && <b>ターン</b>}
