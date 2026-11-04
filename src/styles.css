@@ -511,6 +511,7 @@ input::placeholder {
   flex: none;
   padding: 0 6px;
   font-size: 11px;
+  line-height: 1.2;
 }
 .lp-delta.down {
   color: var(--danger);
