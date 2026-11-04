@@ -849,35 +849,73 @@ input::placeholder {
   color: var(--text);
 }
 
-/* ロビー。カードを並べず、最初の操作に視線を集める */
+/* 最初の画面。対戦画面と同じく、左の映像の枠が大半を占め、操作は右の列に集める */
 .lobby {
-  box-sizing: content-box;
-  max-width: 400px;
-  margin: 0;
-  padding: clamp(40px, 16vh, 160px) 24px 40px clamp(24px, 14vw, 220px);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
 }
-.lobby-lp {
-  align-self: flex-start;
-  height: 96px;
-  margin-bottom: 20px;
-  color: var(--text);
+.lobby-stage {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: #000;
 }
-.lobby-lp .seg-off {
-  opacity: 0.05;
+.table-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
-.lobby h1 {
-  font-size: 20px;
-  line-height: 1.3;
+.lobby-stage::after {
+  content: '';
+  position: absolute;
+  inset: 40% 0 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
 }
 .lobby-lead {
-  color: var(--muted);
-  margin-bottom: 20px;
+  position: absolute;
+  z-index: 1;
+  left: clamp(20px, 4vw, 48px);
+  right: clamp(20px, 4vw, 48px);
+  bottom: clamp(20px, 5vh, 48px);
+  font-size: clamp(22px, 2.8vw, 36px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.lobby-lead span {
+  display: inline-block;
+}
+.lobby-lead code {
+  font-size: 0.8em;
+}
+.lobby-rail {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 24px;
+  background: var(--panel);
+}
+.lobby-rail h1 {
+  font-size: 16px;
+  line-height: 1.3;
+}
+.lobby-lp {
+  width: 100%;
+  height: auto;
+  margin-bottom: 24px;
+  padding: 16px;
+  color: var(--text);
+  background: var(--well);
+}
+.lobby-go {
+  width: 100%;
+  min-height: 48px;
+  font-size: 16px;
 }
 .lobby-join {
-  margin-top: 32px;
+  margin-top: 28px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -982,14 +1020,20 @@ input::placeholder {
     overflow: visible;
   }
   .lobby {
-    box-sizing: border-box;
-    max-width: none;
-    padding: 48px 24px;
+    display: flex;
+    flex-direction: column;
+  }
+  .lobby-stage {
+    flex: none;
+    aspect-ratio: 16 / 10;
+  }
+  .lobby-rail {
+    flex: 1;
+    justify-content: flex-start;
+    padding: 20px 16px 32px;
   }
   .lobby-lp {
-    height: auto;
-    width: 100%;
-    max-width: 320px;
+    margin-bottom: 12px;
   }
 }
 
