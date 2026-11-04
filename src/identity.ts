@@ -48,7 +48,7 @@ export function forgetCamKey(room: string): void {
   }
 }
 
-function randomToken(): string {
+export function randomToken(): string {
   const a = new Uint8Array(16);
   crypto.getRandomValues(a);
   return Array.from(a, (n) => n.toString(16).padStart(2, '0')).join('');
@@ -61,19 +61,15 @@ export const saveName = (name: string) => safeSet(localStorage, 'ygord-name', na
 export const loadCamRotate = () => Number(safeGet(localStorage, 'ygord-cam-rotate') ?? 0);
 export const saveCamRotate = (r: number) => safeSet(localStorage, 'ygord-cam-rotate', String(r));
 
-export function newRoomId(): string {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  // 推測されにくいよう 10 文字(約 49 ビット)にする
-  const a = new Uint32Array(10);
-  crypto.getRandomValues(a);
-  return Array.from(a, (n) => chars[n % chars.length]).join('');
-}
+/** 部屋 ID はホストの公開鍵のハッシュ(net/hostKey.ts)。ゲストはこれでホストの署名を確かめる */
+export const ROOM_RE = /^[0-9a-f]{32}$/;
+/** 画面に出すときの短い部屋 ID */
+export const shortRoom = (room: string) => room.slice(0, 8);
 
-export const ROOM_RE = /^[a-z0-9]{4,12}$/;
-
-export function roomUrl(room: string, extra: Record<string, string> = {}): string {
+/** secret は # 以降に入れる。この部分はサーバーへ送られないので、アクセスログに残らない */
+export function roomUrl(room: string, extra: Record<string, string> = {}, secret: Record<string, string> = {}): string {
   const u = new URL(location.href);
   u.search = new URLSearchParams({ room, ...extra }).toString();
-  u.hash = '';
+  u.hash = new URLSearchParams(secret).toString();
   return u.toString();
 }

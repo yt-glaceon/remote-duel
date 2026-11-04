@@ -1,7 +1,8 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { canChangeSeats, displayName, other, SEATS, type Action, type GameState, type Seat } from '../game/state';
-import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl } from '../identity';
+import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl, shortRoom } from '../identity';
+import { deleteHostKey, loadHostKey, type HostKey } from '../net/hostKey';
 import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient, type View } from '../net/room';
 import { useRoom } from '../net/useRoom';
 import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
@@ -9,15 +10,40 @@ import { Modal, StatusPill, Toast } from './common';
 import { ResultPanel } from './ResultPanel';
 import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
 
-export function Duel({ room, isHost, spectator }: { room: string; isHost: boolean; spectator: boolean }) {
+/** ホストの鍵を読み込んでから部屋を開く。鍵のないブラウザは、リンクに host=1 を付けてもホストになれない */
+export function HostRoom({ room }: { room: string }) {
+  const [key, setKey] = useState<HostKey | null | undefined>(undefined);
+  useEffect(() => {
+    void loadHostKey(room)
+      .then(setKey)
+      .catch(() => setKey(null));
+  }, [room]);
+  if (key === undefined) return <div className="center muted">ルームを開いています…</div>;
+  if (key) return <Duel room={room} hostKey={key} spectator={false} />;
+  return (
+    <div className="app">
+      <div className="center">
+        <p>この部屋はホストとして開けません。</p>
+        <p className="muted small">部屋を閉じたか、1日以上使っていないか、部屋を作ったブラウザとは別のブラウザです。</p>
+        <button className="primary" onClick={() => (location.search = '')}>
+          最初の画面へ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Duel({ room, hostKey, spectator }: { room: string; hostKey: HostKey | null; spectator: boolean }) {
+  const isHost = !!hostKey;
   // 合言葉は最初の1回だけ読む(描画のたびに読むと、部屋を閉じて消した直後に作り直してしまう)
   const [camKey] = useState(() => getCamKey(room));
   const [view, client] = useRoom({
     room,
     isHost,
+    hostKey: hostKey ?? undefined,
     role: spectator ? 'spectator' : 'player',
     name: loadName(),
-    clientId: getClientId(),
+    clientId: hostKey?.clientId ?? getClientId(),
     camKey,
   });
   const [showPhone, setShowPhone] = useState(false);
@@ -40,6 +66,7 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
     if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
     client.closeRoom();
     forgetCamKey(room);
+    void deleteHostKey(room).catch(() => {});
     setTimeout(() => (location.search = ''), 1000);
   };
 
@@ -63,7 +90,7 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
     <div className="app">
       <header className="bar">
         <strong>リモートデュエル</strong>
-        <span className="muted">ルーム {room}</span>
+        <span className="muted">ルーム {shortRoom(room)}</span>
         <StatusPill status={view.status} detail={view.detail} />
         {view.detail && <span className="muted small">{view.detail}</span>}
         <span className="spacer" />
@@ -109,7 +136,7 @@ export function Duel({ room, isHost, spectator }: { room: string; isHost: boolea
 
 function PhoneCameraModal({ room, client, onClose }: { room: string; client: RoomClient; onClose: () => void }) {
   const [camKey, setCamKey] = useState(() => getCamKey(room));
-  const url = roomUrl(room, { cam: '1', key: camKey });
+  const url = roomUrl(room, { cam: '1' }, { key: camKey });
   const [qr, setQr] = useState('');
   useEffect(() => {
     void QRCode.toDataURL(url, { width: 260, margin: 1 }).then(setQr);

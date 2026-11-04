@@ -19,9 +19,11 @@ import {
   type GameState,
   type Seat,
 } from '../game/state';
+import { randomToken } from '../identity';
 import { captureStill, toRotation, tuneSenders, type Rotation } from '../media/camera';
+import { signProof, verifyProof, type HostKey } from './hostKey';
 
-const PEER_PREFIX = 'ygord-v1-';
+const PEER_PREFIX = 'ygord-v2-';
 export const hostPeerId = (room: string) => PEER_PREFIX + room;
 
 export type Role = 'player' | 'camera' | 'spectator';
@@ -39,6 +41,11 @@ const SEAT_GRACE_MS = 60_000;
 /** 映像の受信とカメラ用データ接続の上限。正しい参加者の分を超える通話は受けない */
 const CAM_CONN_MAX = 16;
 const MEMBERS_MAX = 64;
+/** ゲストが接続を始めてから、ホストの本人確認が済むまでの待ち時間 */
+const HOST_CHECK_MS = 15_000;
+/** 接続の生存確認。タブが閉じられても接続の切断が届かないことがあるので、応答がなければ切る */
+const PING_MS = 5000;
+const PING_TIMEOUT_MS = 15_000;
 export const ROOM_CLOSED_TEXT = 'ホストが部屋を閉じました';
 /**
  * ホストが持つ参加者の情報。席は持たず、状態の players[seat].clientId から引く。
@@ -78,6 +85,8 @@ export type View = {
 export type RoomOptions = {
   room: string;
   isHost: boolean;
+  /** ホストだけが持つ鍵。ゲストへの本人確認に使う */
+  hostKey?: HostKey;
   /** ゲストが入るときの希望。席は空いていればホストが割り当てる */
   role: Role;
   name: string;
@@ -89,6 +98,12 @@ export type RoomOptions = {
 };
 
 type RoomMsg =
+  /** ゲストがホストに本人確認を求める */
+  | { t: 'challenge'; nonce: string }
+  /** ホストの公開鍵と署名。ゲストはこれを確かめるまで hello を送らない */
+  | { t: 'proof'; publicKey: string; signature: string }
+  | { t: 'ping' }
+  | { t: 'pong' }
   | { t: 'hello'; clientId: string; role: Role; name: string; camKey: string }
   | { t: 'welcome'; seat: Seat | null; full: boolean; denied?: boolean; reject?: string }
   | { t: 'state'; state: GameState; canUndo: boolean }
@@ -134,6 +149,8 @@ function peerOptions(): PeerOptions {
 
 const randomId = () => Math.random().toString(36).slice(2, 10);
 const isSeat = (v: unknown): v is Seat => v === 'p1' || v === 'p2';
+const dtlsFingerprint = (d: RTCSessionDescription | null | undefined) =>
+  d?.sdp.match(/a=fingerprint:(\S+ \S+)/)?.[1].toLowerCase() ?? '';
 const cameraDetail = (seat: Seat | null) => (seat ? '' : '持ち主が観戦中のため、映像は送っていません');
 const HISTORY_MAX = 100;
 const SNAP_MAX_BYTES = 10_000_000;
@@ -165,6 +182,7 @@ export class RoomClient {
   private destroyed = false;
   private restartTimer: ReturnType<typeof setTimeout> | undefined;
   private connectTimer: ReturnType<typeof setTimeout> | undefined;
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private camLabel = 'カメラ';
   private camRotate: Rotation;
   private camKey: string;
@@ -173,6 +191,11 @@ export class RoomClient {
   // ゲスト側
   private hostConn: DataConnection | null = null;
   private denied = false;
+  /** ホストの本人確認が済むまで、ホストからのメッセージは受け取らない */
+  private hostVerified = false;
+  private hostNonce = '';
+  private hostCheckTimer: ReturnType<typeof setTimeout> | undefined;
+  private hostSeenAt = 0;
   // ホスト側
   private roomConns = new Map<string, DataConnection>();
   private memberMap = new Map<string, Member>();
@@ -184,6 +207,8 @@ export class RoomClient {
   private pendingConns = new Set<DataConnection>();
   /** 接続ごとの、受け付けたメッセージの数(1秒ごとに数え直す) */
   private msgCounts = new WeakMap<DataConnection, { at: number; count: number }>();
+  /** 接続ごとの、最後に何か届いた時刻 */
+  private seenAt = new WeakMap<DataConnection, number>();
   /** 席のある人の回線が切れた時刻(clientId ごと) */
   private goneAt = new Map<string, number>();
   private hostStartedAt = 0;
@@ -240,6 +265,7 @@ export class RoomClient {
 
   start() {
     if (this.destroyed) return;
+    this.heartbeatTimer ??= setInterval(() => this.heartbeat(), PING_MS);
     if (this.o.isHost) this.startHost();
     else this.startGuest();
   }
@@ -248,6 +274,8 @@ export class RoomClient {
     this.destroyed = true;
     clearTimeout(this.restartTimer);
     clearTimeout(this.connectTimer);
+    clearTimeout(this.hostCheckTimer);
+    clearInterval(this.heartbeatTimer);
     this.teardownConnections();
     this.peer?.destroy();
     this.peer = null;
@@ -296,7 +324,7 @@ export class RoomClient {
     if (this.destroyed) return;
     switch (err.type) {
       case 'unavailable-id':
-        this.set({ status: 'reconnecting', detail: '前回の接続が残っているため、少し待って再試行します…' });
+        this.set({ status: 'reconnecting', detail: 'この部屋の ID が使われています。前回の接続が消えるのを待って再試行します…' });
         this.restartPeer(4000);
         break;
       case 'peer-unavailable':
@@ -361,18 +389,18 @@ export class RoomClient {
     if (!this.denied) this.set({ status: this.view.state ? 'reconnecting' : 'connecting' });
     const conn = peer.connect(hostPeerId(this.o.room), { reliable: true, metadata: { kind: 'room' } });
     this.hostConn = conn;
+    this.hostVerified = false;
+    // 開く前の接続は、閉じても close が来ないので、期限を切って次の試行に進む
+    clearTimeout(this.hostCheckTimer);
+    this.hostCheckTimer = setTimeout(() => this.hostCheckFailed(conn), HOST_CHECK_MS);
     conn.on('open', () => {
-      this.send(conn, {
-        t: 'hello',
-        clientId: this.o.clientId,
-        role: this.o.role,
-        name: this.o.name,
-        camKey: this.camKey,
-      });
+      this.hostNonce = randomToken();
+      this.send(conn, { t: 'challenge', nonce: this.hostNonce });
     });
-    conn.on('data', (d) => this.onGuestMsg(d as RoomMsg));
+    conn.on('data', (d) => void this.onGuestData(conn, d as RoomMsg));
     conn.on('close', () => {
       if (this.hostConn !== conn) return;
+      clearTimeout(this.hostCheckTimer);
       this.hostConn = null;
       if (this.closed) return;
       if (this.denied) {
@@ -394,10 +422,93 @@ export class RoomClient {
     if (conn.open) conn.send(msg);
   }
 
+  // ---- ホストの本人確認 ----
+
+  /**
+   * 署名する内容。ゲストの peerId で、別のゲスト向けの署名の使い回しを防ぐ。
+   * DTLS の指紋で、この接続の相手がホスト本人であること(仲介サーバーが割り込んでいないこと)を確かめる
+   */
+  private proofText(conn: DataConnection, nonce: string): string {
+    const local = dtlsFingerprint(conn.peerConnection?.localDescription);
+    const remote = dtlsFingerprint(conn.peerConnection?.remoteDescription);
+    const [guestId, guestPrint, hostPrint] = this.o.isHost
+      ? [conn.peer, remote, local]
+      : [this.peer?.id ?? '', local, remote];
+    return ['ygord-v2', this.o.room, guestId, nonce, guestPrint, hostPrint].join('|');
+  }
+
+  private async answerChallenge(conn: DataConnection, nonce: unknown) {
+    const key = this.o.hostKey;
+    if (!key || typeof nonce !== 'string' || nonce.length !== 32) return;
+    const signature = await signProof(key, this.proofText(conn, nonce));
+    this.send(conn, { t: 'proof', publicKey: key.publicKey, signature });
+  }
+
+  /** 確かめられない相手には hello(clientId と合言葉)を送らず、接続を切って再試行する */
+  private hostCheckFailed(conn: DataConnection) {
+    if (this.hostConn !== conn) return;
+    clearTimeout(this.hostCheckTimer);
+    this.hostConn = null;
+    conn.close();
+    this.set({
+      status: 'reconnecting',
+      detail: 'ホストの本人確認ができません。ホストがページを開いているか確かめてください。再試行中…',
+      members: [],
+    });
+    this.syncCalls();
+    this.scheduleConnect(8000);
+  }
+
+  private async onGuestData(conn: DataConnection, msg: RoomMsg) {
+    if (conn !== this.hostConn) return;
+    if (this.hostVerified) {
+      this.hostSeenAt = Date.now();
+      this.onGuestMsg(msg);
+      return;
+    }
+    if (msg?.t !== 'proof') return;
+    const ok = await verifyProof(this.o.room, msg.publicKey, msg.signature, this.proofText(conn, this.hostNonce));
+    if (conn !== this.hostConn || this.hostVerified) return;
+    if (!ok) {
+      this.hostCheckFailed(conn);
+      return;
+    }
+    clearTimeout(this.hostCheckTimer);
+    this.hostVerified = true;
+    this.hostSeenAt = Date.now();
+    this.send(conn, {
+      t: 'hello',
+      clientId: this.o.clientId,
+      role: this.o.role,
+      name: this.o.name,
+      camKey: this.camKey,
+    });
+  }
+
+  /** 応答のない接続を切る。ゲストは切れたら再接続し、ホストは席を空けずに本人の復帰を待つ */
+  private heartbeat() {
+    const now = Date.now();
+    if (this.o.isHost) {
+      for (const conn of this.roomConns.values()) {
+        const seen = this.seenAt.get(conn) ?? now;
+        this.seenAt.set(conn, seen);
+        if (now - seen > PING_TIMEOUT_MS) conn.close();
+        else this.send(conn, { t: 'ping' });
+      }
+    } else if (this.hostVerified && this.hostConn?.open) {
+      if (now - this.hostSeenAt > PING_TIMEOUT_MS) this.hostConn.close();
+      else this.send(this.hostConn, { t: 'ping' });
+    }
+  }
+
   // ---- 状態の同期 ----
 
   private onGuestMsg(msg: RoomMsg) {
     switch (msg.t) {
+      case 'ping':
+        // タイマーではなく受信を契機に返すので、裏に回したタブでも遅れにくい
+        if (this.hostConn) this.send(this.hostConn, { t: 'pong' });
+        break;
       case 'welcome':
         this.denied = !!msg.denied;
         if (msg.denied) return;
@@ -528,9 +639,21 @@ export class RoomClient {
     const st = this.view.state;
     // 部屋を閉じた後の操作を受けると、消した保存データが書き戻されてしまう
     if (!st || this.closed || !msg || typeof msg !== 'object' || !this.allowMsg(conn)) return;
-    if (msg.t === 'hello') {
+    this.seenAt.set(conn, Date.now());
+    if (msg.t === 'challenge') {
+      void this.answerChallenge(conn, msg.nonce);
+    } else if (msg.t === 'ping') {
+      this.send(conn, { t: 'pong' });
+    } else if (msg.t === 'hello') {
       // 名乗るのは接続ごとに1回だけ(同じ接続で clientId を替えて、席を2つ取るのを防ぐ)
-      if (this.memberMap.has(conn.peer)) return;
+      if (this.roomConns.get(conn.peer) === conn) return;
+      // 同じ peerId からの新しい接続は再接続。ゲストが先に切断に気づくと、古い接続がまだ残っている
+      const stale = this.roomConns.get(conn.peer);
+      if (stale) {
+        this.roomConns.delete(conn.peer);
+        this.memberMap.delete(conn.peer);
+        stale.close();
+      }
       if (
         (msg.role !== 'player' && msg.role !== 'camera' && msg.role !== 'spectator') ||
         typeof msg.clientId !== 'string' ||

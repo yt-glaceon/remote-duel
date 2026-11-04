@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getClientId, loadCamRotate, loadName, saveCamRotate } from '../identity';
+import { getClientId, loadCamRotate, loadName, saveCamRotate, shortRoom } from '../identity';
 import { listCameras, nextRotation, openCamera, stopStream, toRotation } from '../media/camera';
 import { useRoom } from '../net/useRoom';
 import { Rotated, StreamVideo } from './ZoomView';
@@ -113,7 +113,7 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
         <header className="bar">
           <strong>カメラ端末</strong>
           <span className="muted">
-            ルーム {room} / {seat ? `${seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像` : '持ち主は観戦中'}
+            ルーム {shortRoom(room)} / {seat ? `${seat === 'p1' ? 'プレイヤー1' : 'プレイヤー2'}の映像` : '持ち主は観戦中'}
           </span>
           <StatusPill status={view.status} detail={view.detail} />
         </header>

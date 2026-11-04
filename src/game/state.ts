@@ -485,6 +485,14 @@ export function loadState(room: string): GameState | null {
   }
 }
 
+export function hasSavedState(room: string): boolean {
+  try {
+    return localStorage.getItem(storageKey(room)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function saveState(room: string, st: GameState): void {
   try {
     const saved: Saved = { savedAt: Date.now(), state: st };
