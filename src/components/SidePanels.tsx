@@ -224,7 +224,13 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
           placeholder={`${name}の LP`}
           title="数字か式(+ - * / と括弧)。Enter はダメージ。先頭に + で回復、= で値の指定"
         />
-        <button onClick={() => submit('damage')} className="key danger">
+        {/* ダメージと回復は、固定額のボタンの向きの切り替えも兼ねる。色が付いている方がいまの向き */}
+        <button
+          className={healKeys ? 'key' : 'key danger'}
+          aria-pressed={!healKeys}
+          title="入力した値だけダメージを与える。空のまま押すと、下のボタンがダメージの額に戻る"
+          onClick={() => (typing ? submit('damage') : setHealKeys(false))}
+        >
           ダメージ
         </button>
         <button
