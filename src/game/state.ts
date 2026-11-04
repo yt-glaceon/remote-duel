@@ -420,7 +420,13 @@ export function normalizeState(v: unknown): GameState | null {
       .map((e) => ({ id: e.id, at: Number(e.at) || 0, by: isSeat(e.by) ? e.by : null, text: text(e.text, 200) })),
     lastRoll:
       s.lastRoll && (s.lastRoll.kind === 'coin' || s.lastRoll.kind === 'dice') && isSeat(s.lastRoll.by)
-        ? { ...s.lastRoll, value: text(s.lastRoll.value, 4) }
+        ? {
+            id: Number(s.lastRoll.id) || 0,
+            kind: s.lastRoll.kind,
+            value: text(s.lastRoll.value, 4),
+            by: s.lastRoll.by,
+            at: Number(s.lastRoll.at) || 0,
+          }
         : null,
     duelNo: isInt(s.duelNo, 1, 1_000_000) ? s.duelNo : 1,
     result:

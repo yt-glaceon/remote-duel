@@ -27,6 +27,18 @@ export const hostPeerId = (room: string) => PEER_PREFIX + room;
 export type Role = 'player' | 'camera' | 'spectator';
 /** 観戦者の上限(観戦中のホストも含む)。カメラ端末は見る人の数だけ映像を送るので、多すぎるとプレイヤーへの映像まで劣化する */
 export const SPECTATOR_MAX = 4;
+/** 持ち主1人あたりのカメラ端末の上限 */
+const CAMERA_MAX = 3;
+/** 名乗る前の接続の上限と、名乗るまでの待ち時間。名乗らない接続でホストの資源を使い切られないようにする */
+const PENDING_MAX = 8;
+const HELLO_TIMEOUT_MS = 20_000;
+/** ホストが1つの接続から1秒間に受け付けるメッセージの数。人の操作では届かない値にする */
+const MSG_PER_SEC = 20;
+/** 回線が切れた人の席を、他の人が引き継げるようになるまでの時間。本人の復帰を優先する */
+const SEAT_GRACE_MS = 60_000;
+/** 映像の受信とカメラ用データ接続の上限。正しい参加者の分を超える通話は受けない */
+const CAM_CONN_MAX = 16;
+const MEMBERS_MAX = 64;
 export const ROOM_CLOSED_TEXT = 'ホストが部屋を閉じました';
 /**
  * ホストが持つ参加者の情報。席は持たず、状態の players[seat].clientId から引く。
@@ -125,8 +137,26 @@ const isSeat = (v: unknown): v is Seat => v === 'p1' || v === 'p2';
 const cameraDetail = (seat: Seat | null) => (seat ? '' : '持ち主が観戦中のため、映像は送っていません');
 const HISTORY_MAX = 100;
 const SNAP_MAX_BYTES = 10_000_000;
+/** 同じ相手からのスナップショットの要求に空ける間隔 */
+const SNAP_INTERVAL_MS = 3000;
 // スナップショットは画像としてしか扱わない。text/html などを通すと blob URL 経由で XSS になる
 const SNAP_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+/** ホストから届いた参加者一覧も、画面が落ちないよう形を確かめてから使う */
+function parseMembers(v: unknown): PublicMember[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((m) => m && typeof m.peerId === 'string' && (m.role === 'player' || m.role === 'camera' || m.role === 'spectator'))
+    .slice(0, MEMBERS_MAX)
+    .map((m) => ({
+      peerId: m.peerId as string,
+      role: m.role as Role,
+      seat: isSeat(m.seat) ? m.seat : null,
+      name: typeof m.name === 'string' ? m.name.slice(0, 20) : '',
+      host: m.host === true,
+      rotate: toRotation(m.rotate),
+    }));
+}
 
 export class RoomClient {
   private view: View;
@@ -150,8 +180,18 @@ export class RoomClient {
   /** カメラ用の合言葉。人(clientId)ごとに持ち、席を移ってもカメラ端末が付いていく */
   private camKeys = new Map<string, string>();
   private hostName: string;
+  /** まだ名乗っていない接続 */
+  private pendingConns = new Set<DataConnection>();
+  /** 接続ごとの、受け付けたメッセージの数(1秒ごとに数え直す) */
+  private msgCounts = new WeakMap<DataConnection, { at: number; count: number }>();
+  /** 席のある人の回線が切れた時刻(clientId ごと) */
+  private goneAt = new Map<string, number>();
+  private hostStartedAt = 0;
   // カメラ送信(視聴者の peerId ごと)
   private outCalls = new Map<string, { media: MediaConnection; data: DataConnection }>();
+  private snapTaking = false;
+  /** 視聴者ごとの、最後に撮った時刻 */
+  private snapLast = new WeakMap<DataConnection, number>();
   // カメラ受信(送信者の peerId ごと)
   private inCalls = new Map<string, MediaConnection>();
   private camConns = new Map<string, DataConnection>();
@@ -217,6 +257,7 @@ export class RoomClient {
   // ---- 接続の確立 ----
 
   private startHost() {
+    this.hostStartedAt = Date.now();
     this.camKeys.set(this.o.clientId, this.camKey);
     if (!this.view.state) {
       const saved = loadState(this.o.room);
@@ -286,6 +327,8 @@ export class RoomClient {
     this.hostConn = null;
     this.roomConns.forEach((c) => c.close());
     this.roomConns.clear();
+    this.pendingConns.forEach((c) => c.close());
+    this.pendingConns.clear();
     this.memberMap.clear();
     this.closeOutCalls();
     this.inCalls.forEach((c) => c.close());
@@ -361,6 +404,7 @@ export class RoomClient {
         if (msg.reject) {
           // 断られたら再接続しない(入り直すにはページを開き直す)
           this.closed = true;
+          this.closeOutCalls();
           this.set({ status: 'error', detail: String(msg.reject).slice(0, 100), members: [] });
           this.hostConn?.close();
           return;
@@ -368,15 +412,16 @@ export class RoomClient {
         if (this.o.role === 'camera' && this.camRotate && this.hostConn) {
           this.send(this.hostConn, { t: 'rotate', rotate: this.camRotate });
         }
+        const seat = isSeat(msg.seat) ? msg.seat : null;
         this.set({
-          seat: msg.seat,
-          status: this.o.role === 'camera' || msg.seat ? 'online' : 'full',
+          seat,
+          status: this.o.role === 'camera' || seat ? 'online' : 'full',
           detail:
             this.o.role === 'camera'
-              ? cameraDetail(msg.seat)
+              ? cameraDetail(seat)
               : msg.full
                 ? '対戦の席が埋まっているため、観戦者として参加しました'
-                : msg.seat
+                : seat
                   ? ''
                   : '観戦中',
         });
@@ -404,7 +449,7 @@ export class RoomClient {
         this.hostConn?.close();
         break;
       case 'members':
-        if (Array.isArray(msg.members)) this.setMembers(msg.members.filter((m) => m && typeof m.peerId === 'string'));
+        this.setMembers(parseMembers(msg.members));
         break;
       case 'notice':
         if (typeof msg.text === 'string') this.notify(msg.text.slice(0, 100));
@@ -425,34 +470,71 @@ export class RoomClient {
       this.onCamConn(conn);
       return;
     }
-    if (kind !== 'room' || !this.o.isHost) {
+    if (kind !== 'room' || !this.o.isHost || this.pendingConns.size >= PENDING_MAX) {
       conn.close();
       return;
     }
+    this.pendingConns.add(conn);
+    const helloTimer = setTimeout(() => {
+      if (this.pendingConns.delete(conn)) conn.close();
+    }, HELLO_TIMEOUT_MS);
     conn.on('data', (d) => this.onHostMsg(conn, d as RoomMsg));
     conn.on('close', () => {
+      clearTimeout(helloTimer);
+      this.pendingConns.delete(conn);
       if (this.roomConns.get(conn.peer) !== conn) return;
       const m = this.memberMap.get(conn.peer);
       this.roomConns.delete(conn.peer);
       this.memberMap.delete(conn.peer);
       // 席のない人の合言葉は、抜けたら忘れる(接続を繰り返して合言葉の表を膨らませられないように)。
       // 席のある人の分は、再接続を待つあいだカメラ端末が入れるよう残す
-      if (m && !m.camera && !this.isOnline(m.clientId) && !(this.view.state && seatOf(this.view.state, m.clientId))) {
-        this.camKeys.delete(m.clientId);
+      if (m && !m.camera && !this.isOnline(m.clientId)) {
+        if (this.view.state && seatOf(this.view.state, m.clientId)) this.goneAt.set(m.clientId, Date.now());
+        else this.camKeys.delete(m.clientId);
       }
       this.publishMembers();
     });
   }
 
+  /** 送りすぎの接続からのメッセージは捨てる(操作のたびに保存と全員への配信が走るため) */
+  private allowMsg(conn: DataConnection): boolean {
+    const now = Date.now();
+    const c = this.msgCounts.get(conn);
+    if (!c || now - c.at >= 1000) {
+      this.msgCounts.set(conn, { at: now, count: 1 });
+      return true;
+    }
+    c.count++;
+    return c.count <= MSG_PER_SEC;
+  }
+
+  /**
+   * 同じ人の前の接続を切る。入り直しではなく接続だけを増やして、観戦者やカメラ端末の上限を回避できないようにする。
+   * 切られた側が再接続して取り返し合わないよう、再接続しない理由を付けて切る
+   */
+  private replaceConn(clientId: string, camera: boolean) {
+    for (const [peerId, m] of this.memberMap) {
+      if (m.clientId !== clientId || m.camera !== camera) continue;
+      const old = this.roomConns.get(peerId);
+      this.memberMap.delete(peerId);
+      this.roomConns.delete(peerId);
+      if (!old) continue;
+      this.send(old, { t: 'welcome', seat: null, full: false, reject: '別のタブや端末で入り直したため、この画面の接続を切りました' });
+      setTimeout(() => old.close(), 500);
+    }
+  }
+
   private onHostMsg(conn: DataConnection, msg: RoomMsg) {
     const st = this.view.state;
-    if (!st || !msg || typeof msg !== 'object') return;
+    // 部屋を閉じた後の操作を受けると、消した保存データが書き戻されてしまう
+    if (!st || this.closed || !msg || typeof msg !== 'object' || !this.allowMsg(conn)) return;
     if (msg.t === 'hello') {
       // 名乗るのは接続ごとに1回だけ(同じ接続で clientId を替えて、席を2つ取るのを防ぐ)
       if (this.memberMap.has(conn.peer)) return;
       if (
         (msg.role !== 'player' && msg.role !== 'camera' && msg.role !== 'spectator') ||
         typeof msg.clientId !== 'string' ||
+        !msg.clientId ||
         msg.clientId.length > 64 ||
         typeof msg.camKey !== 'string' ||
         msg.camKey.length > 64
@@ -469,21 +551,33 @@ export class RoomClient {
           setTimeout(() => conn.close(), 500);
           return;
         }
+        this.replaceConn(msg.clientId, true);
+        if ([...this.memberMap.values()].filter((m) => m.camera && m.owner === owner).length >= CAMERA_MAX) {
+          this.send(conn, { t: 'welcome', seat: null, full: false, reject: `カメラ端末は1人${CAMERA_MAX}台までです` });
+          setTimeout(() => conn.close(), 500);
+          return;
+        }
+        this.pendingConns.delete(conn);
         this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: true, owner, name, rotate: 0 });
         this.roomConns.set(conn.peer, conn);
         this.send(conn, { t: 'welcome', seat: seatOf(st, owner), full: false });
         this.publishMembers();
         return;
       }
-      // 再接続なら元の席に戻す。対戦を選んだ人は、空いている席があれば座らせる
+      this.replaceConn(msg.clientId, false);
+      // 再接続なら元の席に戻す。対戦を選んだ人は、誰のものでもない席があれば座らせる。
+      // 回線が切れた人の席には自動では座らせない(座るときは本人が確認して選ぶ)
       let seat = seatOf(st, msg.clientId);
-      if (!seat && msg.role === 'player') seat = SEATS.find((s) => !this.seatProblem(msg.clientId, s)) ?? null;
+      if (!seat && msg.role === 'player') {
+        seat = SEATS.find((s) => !st.players[s].clientId && !this.seatProblem(msg.clientId, s)) ?? null;
+      }
       // カメラ端末は見る人の数だけ映像を送るので、観戦者の数に上限を設ける
       if (!seat && this.watcherCount(conn.peer) >= SPECTATOR_MAX) {
         this.send(conn, { t: 'welcome', seat: null, full: true, reject: `観戦者が満員です(${SPECTATOR_MAX}人まで)` });
         setTimeout(() => conn.close(), 500);
         return;
       }
+      this.pendingConns.delete(conn);
       this.memberMap.set(conn.peer, { peerId: conn.peer, clientId: msg.clientId, camera: false, owner: null, name, rotate: 0 });
       this.roomConns.set(conn.peer, conn);
       if (msg.camKey) this.camKeys.set(msg.clientId, msg.camKey);
@@ -555,6 +649,10 @@ export class RoomClient {
     }
     const holder = st.players[to].clientId;
     if (holder && this.isOnline(holder)) return 'その席には他のプレイヤーが座っています';
+    // 回線が切れた直後は、本人が戻れるよう席を空けておく
+    if (holder && Date.now() - (this.goneAt.get(holder) ?? this.hostStartedAt) < SEAT_GRACE_MS) {
+      return '回線が切れた人の復帰を待っています。1分ほどたってから座ってください';
+    }
     // デュエル中でも、空いた席に観戦者が入るのは認める(回線が切れた人の復帰や代打のため)
     if (from && !free) return 'デュエル中は席を移れません。決着後か、やり直した後に移ってください';
     return null;
@@ -575,7 +673,10 @@ export class RoomClient {
     if (next === st) return;
     // 回線が切れた人の席を引き継いだら、その人の合言葉は忘れる(カメラ端末が新しい持ち主の席に映らないように)
     const prev = to ? st.players[to].clientId : null;
-    if (prev && prev !== clientId && !this.isOnline(prev)) this.camKeys.delete(prev);
+    if (prev && prev !== clientId && !this.isOnline(prev)) {
+      this.camKeys.delete(prev);
+      this.goneAt.delete(prev);
+    }
     this.commit(next);
   }
 
@@ -787,7 +888,15 @@ export class RoomClient {
   }
 
   private async onSnapReq(conn: DataConnection, msg: CamMsg) {
-    if (msg?.t !== 'snapReq' || typeof msg.reqId !== 'string') return;
+    if (msg?.t !== 'snapReq' || typeof msg.reqId !== 'string' || msg.reqId.length > 32) return;
+    // 要求の連打でカメラを止められないよう、撮るのは同時に1枚だけにし、同じ相手からは間隔を空ける
+    const now = Date.now();
+    if (this.snapTaking || now - (this.snapLast.get(conn) ?? 0) < SNAP_INTERVAL_MS) {
+      this.send(conn, { t: 'snapErr', reqId: msg.reqId, message: '撮影中です。少し待ってください' });
+      return;
+    }
+    this.snapTaking = true;
+    this.snapLast.set(conn, now);
     const stream = this.view.localStream;
     try {
       if (!stream) throw new Error('カメラが止まっています');
@@ -797,6 +906,8 @@ export class RoomClient {
       this.notify('高画質スナップショットを送りました');
     } catch (e) {
       this.send(conn, { t: 'snapErr', reqId: msg.reqId, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      this.snapTaking = false;
     }
   }
 
@@ -804,7 +915,7 @@ export class RoomClient {
 
   private onCall(call: MediaConnection) {
     const md = call.metadata as Partial<CamMeta> | undefined;
-    if (md?.kind !== 'cam') {
+    if (md?.kind !== 'cam' || (this.inCalls.size >= CAM_CONN_MAX && !this.inCalls.has(call.peer))) {
       call.close();
       return;
     }
@@ -828,6 +939,10 @@ export class RoomClient {
   }
 
   private onCamConn(conn: DataConnection) {
+    if (this.camConns.size >= CAM_CONN_MAX && !this.camConns.has(conn.peer)) {
+      conn.close();
+      return;
+    }
     this.camConns.get(conn.peer)?.close();
     this.camConns.set(conn.peer, conn);
     conn.on('data', (d) => this.onCamMsg(conn, d as CamMsg));

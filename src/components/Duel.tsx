@@ -221,7 +221,7 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
           ))}
         </ul>
       )}
-      {!free && <p className="muted small">決着後か、やり直した後に入れ替えられます。空いた席には、観戦者がいつでも座れます。</p>}
+      {!free && <p className="muted small">決着後か、やり直した後に入れ替えられます。空いた席には観戦者も座れます(回線が切れた人の席は、切れてから1分後)。</p>}
     </div>
   );
 }
