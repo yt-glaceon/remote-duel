@@ -123,9 +123,8 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
             <p className="muted">
               送信中 {settings?.width}×{settings?.height} ・ 視聴者 {viewers} 人
             </p>
-            <p className="muted small">映像は、相手の画面に映るのと同じ向きで表示しています。</p>
             <div className="cam-actions">
-              <button onClick={turn}>↻ 映像を回す({rotate}°)</button>
+              <button onClick={turn}>映像を回す({rotate}°)</button>
               <button onClick={flip}>{facing === 'environment' ? 'インカメにする' : '外カメにする'}</button>
               {canFullscreen && (
                 <button onClick={() => void toggleLandscape()}>{fullscreen ? '全画面をやめる' : '横画面にする'}</button>
@@ -135,7 +134,11 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
               <p className="muted small">この画面を横向きで見るときは、端末の画面の回転ロックを外して横に持ってください。</p>
             )}
             {devices.length > 1 && (
-              <select value={deviceId} onChange={(e) => void start(e.target.value)}>
+              <select
+                value={deviceId}
+                onChange={(e) => void start(e.target.value)}
+                title="広角や望遠は、端末がブラウザに見せている場合だけ出ます"
+              >
                 {devices.map((d, i) => (
                   <option key={d.deviceId} value={d.deviceId}>
                     {d.label || `カメラ ${i + 1}`}
@@ -143,7 +146,6 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
                 ))}
               </select>
             )}
-            <p className="muted small">広角や望遠のカメラは、端末がブラウザに見せている場合だけ上の一覧に出ます。</p>
             <button
               onClick={() => {
                 stopStream(stream);
@@ -154,8 +156,8 @@ export function CameraOnly({ room, camKey }: { room: string; camKey: string }) {
             </button>
           </>
         ) : (
-          <div className="card">
-            <p>このスマホを盤面の真上に固定して、カメラを開始してください。</p>
+          <div className="cam-start">
+            <p>スマホを盤面の真上に固定して、開始します。</p>
             <button className="primary" onClick={() => void start()}>
               カメラを開始
             </button>

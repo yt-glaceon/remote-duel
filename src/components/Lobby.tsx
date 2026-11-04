@@ -10,26 +10,23 @@ export function JoinChoice({ room }: { room: string }) {
     location.search = new URLSearchParams({ room, as }).toString();
   };
   return (
-    <div className="lobby">
+    <main className="lobby">
       <h1>リモートデュエル</h1>
-      <p className="muted">ルーム {shortRoom(room)} に招待されています。</p>
+      <p className="lobby-lead">
+        ルーム <code>{shortRoom(room)}</code> への招待
+      </p>
       <label className="field">
-        <span>あなたの名前</span>
-        <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="例: たろう" />
+        <span>名前</span>
+        <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="たろう" />
       </label>
-      <div className="card">
-        <h2>対戦する</h2>
-        <p className="muted">対戦相手として参加します。席が埋まっているときは観戦になります。</p>
-        <button className="primary" onClick={() => join('play')}>
-          対戦する
-        </button>
-      </div>
-      <div className="card">
-        <h2>観戦する</h2>
-        <p className="muted">LP やカメラ映像を見るだけで、操作はしません(観戦は4人まで)。</p>
-        <button onClick={() => join('watch')}>観戦する</button>
-      </div>
-    </div>
+      <button className="primary wide" onClick={() => join('play')}>
+        対戦する
+      </button>
+      <button className="wide" onClick={() => join('watch')}>
+        観戦する
+      </button>
+      <p className="muted small">席が埋まっているときは観戦になります。観戦は4人まで。</p>
+    </main>
   );
 }
 
@@ -64,38 +61,36 @@ export function Lobby({ invalidLink = false }: { invalidLink?: boolean }) {
   };
 
   return (
-    <div className="lobby">
+    <main className="lobby">
       <h1>リモートデュエル</h1>
-      <p className="muted">ライフ・フェイズ・チェーンを共有し、相手のカメラ映像を手元で拡大して見られます。</p>
+      <p className="lobby-lead">手元のカードをカメラに映して、離れた相手と対戦する。</p>
       {invalidLink && <p className="error">このリンクは使えません。古い形式のリンクの場合は、ホストに新しい招待リンクをもらってください。</p>}
       <label className="field">
-        <span>あなたの名前</span>
-        <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="例: たろう" />
+        <span>名前</span>
+        <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="たろう" />
       </label>
-      <div className="card">
-        <h2>ルームを作る</h2>
-        <p className="muted">作ったあと、招待リンクを相手に送ってください。</p>
-        <button className="primary" onClick={() => void create()}>
-          ルームを作る
-        </button>
-        {createError && <p className="error">{createError}</p>}
-      </div>
-      <div className="card">
-        <h2>ルームに入る</h2>
-        <div className="row">
-          <input
-            value={link}
-            onChange={(e) => {
-              setLink(e.target.value);
-              setError('');
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && join()}
-            placeholder="招待リンク"
-          />
-          <button onClick={join}>入る</button>
-        </div>
+      <button className="primary wide" onClick={() => void create()}>
+        ルームを作る
+      </button>
+      {createError && <p className="error">{createError}</p>}
+      <div className="lobby-join">
+        <label className="field">
+          <span>招待リンクがあるとき</span>
+          <div className="row">
+            <input
+              value={link}
+              onChange={(e) => {
+                setLink(e.target.value);
+                setError('');
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && join()}
+              placeholder="https://…"
+            />
+            <button onClick={join}>入る</button>
+          </div>
+        </label>
         {error && <p className="error">{error}</p>}
       </div>
-    </div>
+    </main>
   );
 }

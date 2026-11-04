@@ -28,20 +28,15 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
   };
 
   return (
-    <div className={`panel result-panel ${!r && zero.length > 0 ? 'alert' : ''}`}>
-      <div className="panel-head">
-        <strong>デュエル {state.duelNo}</strong>
-        <span className="muted small">
-          通算{' '}
-          {rec.wins.length === 0 && rec.draws === 0
-            ? 'まだなし'
-            : rec.wins.map((w) => `${w.name} ${w.wins}勝`).join('・')}
-          {rec.draws > 0 && `(引き分け ${rec.draws})`}
-        </span>
-      </div>
+    <div className={`tab-sec result-panel ${!r && zero.length > 0 ? 'alert' : ''}`}>
+      <p className="muted small">
+        デュエル {state.duelNo}・通算{' '}
+        {rec.wins.length === 0 && rec.draws === 0 ? 'なし' : rec.wins.map((w) => `${w.name} ${w.wins}勝`).join('・')}
+        {rec.draws > 0 && `(引き分け ${rec.draws})`}
+      </p>
 
       {r ? (
-        <div className={`result-banner ${r.winner ? `win-${r.winner}` : 'draw'}`}>{resultText(state, r)}</div>
+        <div className="result-banner">{resultText(state, r)}</div>
       ) : (
         zero.length > 0 && (
           <p className="small result-hint">
@@ -88,7 +83,7 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
           <div className="row">
             {r && (
               <button className="primary" onClick={() => dispatch({ type: 'nextDuel' })}>
-                次のデュエル ▶
+                次のデュエル
               </button>
             )}
             <button
@@ -113,7 +108,7 @@ export function ResultPanel({ state, dispatch, readOnly }: Props) {
           </div>
           {r && (
             <p className="muted small">
-              次のデュエルは、負けたプレイヤーが先攻になります(先攻・後攻は、ターン欄のボタンで変えられます)
+              次のデュエルは、負けたプレイヤーが先攻です(変えるときは「先攻」のボタンで)
             </p>
           )}
         </>

@@ -1,14 +1,22 @@
 import QRCode from 'qrcode';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { canChangeSeats, displayName, other, SEATS, type Action, type GameState, type Seat } from '../game/state';
 import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl, shortRoom } from '../identity';
 import { deleteHostKey, loadHostKey, type HostKey } from '../net/hostKey';
 import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient, type View } from '../net/room';
 import { useRoom } from '../net/useRoom';
-import { MyCamera, OpponentCams, Snapshots } from './CameraArea';
+import { MyCamera, OpponentCams, selfFeeds, Snapshots } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
 import { ResultPanel } from './ResultPanel';
-import { ChainPanel, LogPanel, LpCard, RollPanel, TurnBar } from './SidePanels';
+import { ChainPanel, FirstPlayer, LogPanel, LpBoard, RollFlash, RollPanel, TurnBar } from './SidePanels';
+
+type Tab = 'duel' | 'camera' | 'room' | 'log';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'duel', label: 'デュエル' },
+  { id: 'camera', label: 'カメラ' },
+  { id: 'room', label: '部屋' },
+  { id: 'log', label: '履歴' },
+];
 
 /** ホストの鍵を読み込んでから部屋を開く。鍵のないブラウザは、リンクに host=1 を付けてもホストになれない */
 export function HostRoom({ room }: { room: string }) {
@@ -48,6 +56,8 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
   });
   const [showPhone, setShowPhone] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 観戦者は、まず席や参加者の様子を見たいので部屋のタブから始める
+  const [tab, setTab] = useState<Tab>(spectator ? 'room' : 'duel');
   const { state, seat } = view;
   const me = seat ?? 'p1';
   const readOnly = !seat || view.status === 'full';
@@ -61,6 +71,12 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
 
   const seatTaken = (s: Seat) => view.members.some((m) => m.role === 'player' && m.seat === s);
   const watchers = view.members.filter((m) => m.role === 'spectator');
+
+  // LP が 0 になった、または勝敗が付いたら、確定の操作があるタブを開く
+  const needsResult = !!state && (!!state.result || SEATS.some((s) => state.players[s].lp === 0));
+  useEffect(() => {
+    if (needsResult) setTab('duel');
+  }, [needsResult]);
 
   const closeRoom = () => {
     if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
@@ -90,19 +106,11 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
     <div className="app">
       <header className="bar">
         <strong>リモートデュエル</strong>
-        <span className="muted">ルーム {shortRoom(room)}</span>
+        <code className="muted">{shortRoom(room)}</code>
         <StatusPill status={view.status} detail={view.detail} />
-        {view.detail && <span className="muted small">{view.detail}</span>}
+        {view.detail && view.detail !== '観戦中' && <span className="muted small">{view.detail}</span>}
         <span className="spacer" />
-        {isHost && state && !SEATS.every(seatTaken) && <span className="muted small">プレイヤーを待っています →</span>}
-        {watchers.length > 0 && <span className="muted small">観戦 {watchers.length}人</span>}
-        <button onClick={() => void copyInvite()}>{copied ? 'コピーしました' : '招待リンクをコピー'}</button>
-        {seat && <button onClick={() => setShowPhone(true)}>スマホをカメラにする</button>}
-        {isHost && (
-          <button className="danger" onClick={closeRoom}>
-            部屋を閉じる
-          </button>
-        )}
+        {watchers.length > 0 && <span className="muted small">観戦 {watchers.length}</span>}
       </header>
 
       {!state ? (
@@ -111,19 +119,61 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
         <main className="duel">
           <section className="stage">
             {/* 観戦者は両方のプレイヤーの映像を見る */}
-            <OpponentCams view={view} client={client} seats={seat ? [other(me)] : ['p1', 'p2']} me={seat} state={state} />
+            <OpponentCams
+              view={view}
+              client={client}
+              seats={seat ? [other(me)] : ['p1', 'p2']}
+              me={seat}
+              state={state}
+              empty={
+                <BlankSlate
+                  view={view}
+                  waitingOpponent={!!seat && !seatTaken(other(seat))}
+                  copied={copied}
+                  onInvite={() => void copyInvite()}
+                  onCamera={() => setTab('camera')}
+                />
+              }
+            />
             <Snapshots snaps={view.snaps} state={state} />
           </section>
           <aside className="side">
-            <SeatsPanel view={view} client={client} state={state} isHost={isHost} />
-            <LpCard state={state} seat={other(me)} isMe={false} me={me} dispatch={dispatch} readOnly={readOnly} />
-            <LpCard state={state} seat={me} isMe={!readOnly} me={me} dispatch={dispatch} readOnly={readOnly} />
-            <ResultPanel state={state} dispatch={dispatch} readOnly={readOnly} />
+            <LpBoard state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
             <TurnBar state={state} me={me} dispatch={dispatch} readOnly={readOnly} canUndo={view.canUndo} />
             <ChainPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
-            <RollPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
-            {seat && <MyCamera view={view} client={client} me={me} />}
-            <LogPanel state={state} />
+            <RollFlash state={state} />
+            <RailTabs
+              tab={tab === 'camera' && !seat ? 'room' : tab}
+              onTab={setTab}
+              hasCamera={!!seat}
+              // 自分の映像が相手に届いていないことと、勝敗の確定待ちは、タブを閉じていても分かるようにする
+              dots={{ camera: !!seat && selfFeeds(view, seat).length === 0, duel: needsResult && tab !== 'duel' }}
+            >
+              {{
+                duel: (
+                  <div className={needsResult ? 'duel-tab result-first' : 'duel-tab'}>
+                    <RollPanel state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
+                    <FirstPlayer state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
+                    <ResultPanel state={state} dispatch={dispatch} readOnly={readOnly} />
+                  </div>
+                ),
+                camera: seat && <MyCamera view={view} client={client} me={me} onPhone={() => setShowPhone(true)} />,
+                room: (
+                  <>
+                    <SeatsPanel view={view} client={client} state={state} isHost={isHost} />
+                    <div className="tab-sec room-actions">
+                      <button onClick={() => void copyInvite()}>{copied ? 'コピーしました' : '招待リンクをコピー'}</button>
+                      {isHost && (
+                        <button className="danger" onClick={closeRoom}>
+                          部屋を閉じる
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ),
+                log: <LogPanel state={state} />,
+              }}
+            </RailTabs>
           </aside>
         </main>
       )}
@@ -131,6 +181,74 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
       {showPhone && seat && <PhoneCameraModal room={room} client={client} onClose={() => setShowPhone(false)} />}
       <Toast notice={view.notice} />
     </div>
+  );
+}
+
+/**
+ * 右列の下半分のタブ。切り替えても中身を消さない(自分のカメラの選択などを保つ)ので、
+ * 全部を描画して hidden で隠す
+ */
+function RailTabs({
+  tab,
+  onTab,
+  hasCamera,
+  dots,
+  children,
+}: {
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  hasCamera: boolean;
+  dots: Partial<Record<Tab, boolean>>;
+  children: Record<Tab, ReactNode>;
+}) {
+  return (
+    <div className="rail-tabs">
+      <div className="tab-list" role="tablist">
+        {TABS.filter((t) => hasCamera || t.id !== 'camera').map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>
+            {t.label}
+            {dots[t.id] && <i className="tab-dot" />}
+          </button>
+        ))}
+      </div>
+      {TABS.map((t) => (
+        <div key={t.id} className="tab-body" role="tabpanel" hidden={tab !== t.id}>
+          {children[t.id]}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 映像がまだないときの案内。次にすることのボタンを、ここに置く */
+function BlankSlate({
+  view,
+  waitingOpponent,
+  copied,
+  onInvite,
+  onCamera,
+}: {
+  view: View;
+  waitingOpponent: boolean;
+  copied: boolean;
+  onInvite: () => void;
+  onCamera: () => void;
+}) {
+  const seat = view.seat;
+  const noCamera = !!seat && selfFeeds(view, seat).length === 0;
+  return (
+    <>
+      <h2>{waitingOpponent ? '相手を待っています' : seat ? '相手のカメラを待っています' : 'プレイヤーのカメラを待っています'}</h2>
+      {waitingOpponent && <p className="muted">招待リンクを送ると、相手はブラウザだけで参加できます。</p>}
+      <div className="row">
+        {waitingOpponent && (
+          <button className="primary" onClick={onInvite}>
+            {copied ? 'コピーしました' : '招待リンクをコピー'}
+          </button>
+        )}
+        {noCamera && <button onClick={onCamera}>自分のカメラを設定</button>}
+      </div>
+    </>
   );
 }
 
@@ -145,22 +263,24 @@ function PhoneCameraModal({ room, client, onClose }: { room: string; client: Roo
   return (
     <Modal onClose={onClose}>
       <h2>スマホをカメラにする</h2>
-      <p className="muted">スマホでこの QR コードを読み取り、盤面の真上に固定してください。映像は相手に届き、あなたの画面にも小さく表示されます。</p>
-      <p className="muted small">席を移っても、スマホはあなたに付いていきます。観戦に回っている間は、映像を送りません。</p>
-      <p className="muted small">このリンクにはあなた専用の合言葉が入っています。ほかの人には送らないでください。</p>
+      <p className="muted">QR コードを読み取り、スマホを盤面の真上に固定します。</p>
       {qr && <img src={qr} alt="カメラ端末用リンクの QR コード" className="qr" />}
+      <p className="small">このリンクにはあなた専用の合言葉が入っています。ほかの人には送らないでください。</p>
       <input readOnly value={url} onFocus={(e) => e.target.select()} />
-      <button
-        onClick={() => {
-          if (!confirm('合言葉を作り直しますか?いまのリンクで接続中のカメラ端末は切断され、古いリンクでは入れなくなります。')) return;
-          const key = renewCamKey(room);
-          client.renewCamKey(key);
-          setCamKey(key);
-        }}
-      >
-        合言葉を作り直す
-      </button>
-      <p className="muted small">リンクを他の人に知られたときや、カメラ端末を替えたいときに使います。</p>
+      <details>
+        <summary>リンクを知られたとき</summary>
+        <p className="muted small">合言葉を作り直すと、古いリンクでは入れなくなり、接続中のカメラ端末は切断されます。</p>
+        <button
+          onClick={() => {
+            if (!confirm('合言葉を作り直しますか?いまのリンクで接続中のカメラ端末は切断され、古いリンクでは入れなくなります。')) return;
+            const key = renewCamKey(room);
+            client.renewCamKey(key);
+            setCamKey(key);
+          }}
+        >
+          合言葉を作り直す
+        </button>
+      </details>
       {insecure && <p className="error small">いまは HTTPS ではないため、スマホのカメラは使えません。公開した URL か `npm run dev:lan` で開いてください。</p>}
     </Modal>
   );
@@ -190,11 +310,10 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
   );
 
   return (
-    <div className="panel seats">
-      <div className="panel-head">
-        <strong>参加者 {people}人</strong>
-        <span className="muted small">{free ? '席を入れ替えできます' : 'デュエル中は席を入れ替えできません'}</span>
-      </div>
+    <div className="tab-sec seats">
+      <p className="muted small">
+        参加者 {people}人{free ? '・席を入れ替えできます' : ''}
+      </p>
       {SEATS.map((s) => {
         const holder = view.members.find((m) => m.role === 'player' && m.seat === s);
         const cams = view.members.filter((m) => m.role === 'camera' && m.seat === s).length;
@@ -208,7 +327,7 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
               {tags(holder)}
               {cams > 0 && (
                 <span className="tag" title="この席の映像を送っているスマホ">
-                  📷 スマホ{cams > 1 ? ` ×${cams}` : ''}
+                  スマホ{cams > 1 ? ` ×${cams}` : ''}
                 </span>
               )}
             </span>
@@ -248,7 +367,7 @@ function SeatsPanel({ view, client, state, isHost }: { view: View; client: RoomC
           ))}
         </ul>
       )}
-      {!free && <p className="muted small">決着後か、やり直した後に入れ替えられます。空いた席には観戦者も座れます(回線が切れた人の席は、切れてから1分後)。</p>}
+      {!free && <p className="muted small">席の入れ替えは決着後かやり直し後。空席には観戦者も座れます(回線が切れた席は1分後)。</p>}
     </div>
   );
 }

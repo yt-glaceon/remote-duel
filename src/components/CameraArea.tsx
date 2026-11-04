@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { displayName, type GameState, type Seat } from '../game/state';
 import { listCameras, nextRotation, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
@@ -12,6 +12,7 @@ export function OpponentCams({
   seats,
   me,
   state,
+  empty,
 }: {
   view: View;
   client: RoomClient;
@@ -19,6 +20,8 @@ export function OpponentCams({
   /** プレイヤーなら自分の席。自分のカメラを隅に小さく出す。観戦者は null */
   me: Seat | null;
   state: GameState;
+  /** 映像がないときに、映像の枠に出す案内 */
+  empty: ReactNode;
 }) {
   // 席が確定していない映像は表示しない
   const cams = view.cams.filter((c) => c.seat && seats.includes(c.seat));
@@ -51,20 +54,18 @@ export function OpponentCams({
           <div className="row stage-tools">
             <span className="muted small">
               {cam.seat ? displayName(state, cam.seat) : '相手'}の{cam.label}
-              ・ホイール/ピンチで拡大、ドラッグで移動、ダブルクリックで戻る
             </span>
-            <button className="primary" disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
-              {view.snapBusy ? '撮影中…' : '📷 高画質で撮る'}
+            <span className="muted small stage-hint">ホイールで拡大・ドラッグで移動・ダブルクリックで戻す</span>
+            <span className="spacer" />
+            <button disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
+              {view.snapBusy ? '撮影中…' : '高画質で撮る'}
             </button>
           </div>
         </>
       ) : (
         <div className="video-wrap">
           <div className="video-box placeholder">
-            <p>{watching ? 'カメラ映像はまだ届いていません' : '相手のカメラ映像はまだ届いていません'}</p>
-            <p className="muted small">
-              {watching ? 'プレイヤーがカメラを開始すると、ここに表示されます' : '相手がカメラを開始すると、ここに表示されます'}
-            </p>
+            {empty}
           </div>
           {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
         </div>
@@ -74,7 +75,7 @@ export function OpponentCams({
 }
 
 /** 自分のカメラの選択と、相手に送っている映像の確認 */
-export function MyCamera({ view, client, me }: { view: View; client: RoomClient; me: Seat }) {
+export function MyCamera({ view, client, me, onPhone }: { view: View; client: RoomClient; me: Seat; onPhone: () => void }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
@@ -112,11 +113,12 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
   const settings = stream?.getVideoTracks()[0]?.getSettings();
 
   return (
-    <div className="panel my-camera">
-      <div className="panel-head">
-        <strong>自分のカメラ</strong>
-        {stream && <span className="muted small">送信中 {settings?.width}×{settings?.height}</span>}
-      </div>
+    <div className="tab-sec my-camera">
+      {stream && (
+        <p className="muted small">
+          送信中 <code>{settings?.width}×{settings?.height}</code>
+        </p>
+      )}
       <select value={deviceId} onChange={(e) => void start(e.target.value)}>
         <option value="">使わない</option>
         {devices.map((d, i) => (
@@ -126,6 +128,7 @@ export function MyCamera({ view, client, me }: { view: View; client: RoomClient;
         ))}
         {import.meta.env.DEV && <option value={TEST_PATTERN_ID}>テスト映像(開発用)</option>}
       </select>
+      <button onClick={onPhone}>スマホをカメラにする</button>
       {error && <p className="error small">{error}</p>}
       <div className="thumbs">
         {feeds.map((f) => (
@@ -160,7 +163,7 @@ function RotateButton({ feed, client }: { feed: SelfFeed; client: RoomClient }) 
         client.rotateCam(feed.id, nextRotation(feed.rotate));
       }}
     >
-      ↻ {feed.rotate}°
+      回転 {feed.rotate}°
     </button>
   );
 }
@@ -183,7 +186,7 @@ function FeedModal({ feed, client, onClose }: { feed: SelfFeed; client: RoomClie
         </Rotated>
       </ZoomView>
       <div className="row">
-        <p className="muted small">相手に送っている映像です。盤面が映っているか、文字が読めるかを確かめられます。</p>
+        <p className="muted small">相手に送っている映像です。</p>
         <RotateButton feed={feed} client={client} />
       </div>
     </Modal>
@@ -216,11 +219,7 @@ export function Snapshots({ snaps, state }: { snaps: Snap[]; state: GameState })
   const [open, setOpen] = useState<Snap | null>(null);
   if (snaps.length === 0) return null;
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <strong>スナップショット</strong>
-        <span className="muted small">クリックで拡大</span>
-      </div>
+    <div className="snap-strip">
       <div className="snaps">
         {snaps.map((s) => (
           <button key={s.id} className="snap-thumb" onClick={() => setOpen(s)} title="クリックで拡大">
