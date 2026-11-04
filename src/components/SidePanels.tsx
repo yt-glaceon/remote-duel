@@ -26,6 +26,7 @@ export function LpBoard({ state, me, dispatch, readOnly }: Props) {
           seat={s}
           selected={!readOnly && s === target}
           onSelect={readOnly ? undefined : () => setTarget(s)}
+          onRestore={readOnly ? undefined : (value) => dispatch({ type: 'lpSet', seat: s, value })}
         />
       ))}
       {!readOnly && <LpEntry state={state} seat={target} dispatch={dispatch} />}
@@ -60,37 +61,59 @@ function useCountedLp(target: number) {
   return shown;
 }
 
-/** 表示中の LP と、直前の増減。増減は変わった直後の少しの間だけ返す */
-function useLpDisplay(lp: number) {
+/** LP の増減を出して、取り消しを受け付ける時間。続けて変えた分は、この間ひとまとめにする */
+const LP_CHANGE_MS = 5000;
+
+/**
+ * 表示中の LP と、直前の増減。from は続けて変える前の値で、取り消しの戻し先になる。
+ * 次のデュエルで LP が初期値に戻るのは増減として扱わない
+ */
+function useLpDisplay(lp: number, duelNo: number) {
   const shown = useCountedLp(lp);
-  const [change, setChange] = useState<number | null>(null);
+  const [flash, setFlash] = useState<'down' | 'up' | null>(null);
+  const [from, setFrom] = useState<number | null>(null);
   const prev = useRef(lp);
+  const prevDuel = useRef(duelNo);
+
   useEffect(() => {
-    if (lp === prev.current) return;
-    setChange(lp - prev.current);
+    const before = prev.current;
     prev.current = lp;
-    const t = setTimeout(() => setChange(null), 1200);
-    return () => clearTimeout(t);
-  }, [lp]);
-  return { shown, change };
+    const newDuel = duelNo !== prevDuel.current;
+    prevDuel.current = duelNo;
+    if (newDuel) {
+      setFlash(null);
+      setFrom(null);
+      return;
+    }
+    if (lp === before) return;
+    setFlash(lp < before ? 'down' : 'up');
+    setFrom((f) => f ?? before);
+    const flashTimer = setTimeout(() => setFlash(null), 1200);
+    const fromTimer = setTimeout(() => setFrom(null), LP_CHANGE_MS);
+    return () => {
+      clearTimeout(flashTimer);
+      clearTimeout(fromTimer);
+    };
+  }, [lp, duelNo]);
+
+  return { shown, flash, from };
 }
 
-function lpClass(lp: number, change: number | null) {
-  const flash = change === null ? '' : change < 0 ? 'down' : 'up';
-  return `lp-value ${flash} ${lp === 0 ? 'zero' : ''}`;
+function lpClass(lp: number, flash: 'down' | 'up' | null) {
+  return `lp-value ${flash ?? ''} ${lp === 0 ? 'zero' : ''}`;
 }
 
 /** 映像の左上に重ねる、映っている人の名前と LP。視線を映像から外さずに読めるようにする */
 export function VideoTag({ state, seat, label }: { state: GameState; seat: Seat; label: string }) {
   const lp = state.players[seat].lp;
-  const { shown, change } = useLpDisplay(lp);
+  const { shown, flash } = useLpDisplay(lp, state.duelNo);
   return (
     <div className="video-tag">
       <span className="video-tag-name">
         <SeatMark seat={seat} />
         {displayName(state, seat)}の{label}
       </span>
-      <span className={lpClass(lp, change)} role="img" aria-label={`LP ${lp}`}>
+      <span className={lpClass(lp, flash)} role="img" aria-label={`LP ${lp}`}>
         <SevenSeg value={shown} />
       </span>
     </div>
@@ -102,18 +125,23 @@ function LpRow({
   seat,
   selected,
   onSelect,
+  onRestore,
 }: {
   state: GameState;
   seat: Seat;
   selected: boolean;
   onSelect?: () => void;
+  /** 指定した値に戻す。表示専用の画面では渡さない */
+  onRestore?: (value: number) => void;
 }) {
   const p = state.players[seat];
-  const { shown, change } = useLpDisplay(p.lp);
+  const { shown, flash, from } = useLpDisplay(p.lp, state.duelNo);
+  // 続けて変えた結果が元と同じなら、増減はなかったものとして扱う
+  const change = from === null || from === p.lp ? null : p.lp - from;
   const turn = state.turnPlayer === seat;
 
   const value = (
-    <span className={lpClass(p.lp, change)} role="img" aria-label={`LP ${p.lp}`}>
+    <span className={lpClass(p.lp, flash)} role="img" aria-label={`LP ${p.lp}`}>
       <SevenSeg value={shown} />
     </span>
   );
@@ -125,15 +153,31 @@ function LpRow({
           <SeatMark seat={seat} />
           {displayName(state, seat)}
         </span>
-        <span className="lp-meta">
-          {state.firstPlayer === seat ? '先攻' : '後攻'}
-          {turn && <b>ターン</b>}
-          {change !== null && (
+        {/* 増減を出す間は、同じ場所に出して LP の行の高さと幅を変えない */}
+        {change === null ? (
+          <span className="lp-meta">
+            {state.firstPlayer === seat ? '先攻' : '後攻'}
+            {turn && <b>ターン</b>}
+          </span>
+        ) : (
+          <span className="lp-meta">
             <span className={change < 0 ? 'lp-delta down' : 'lp-delta up'}>
               {change < 0 ? `−${-change}` : `+${change}`}
             </span>
-          )}
-        </span>
+            {onRestore && (
+              <button
+                className="small-btn lp-undo"
+                title={`LP を ${from} に戻す`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestore(from!);
+                }}
+              >
+                取り消す
+              </button>
+            )}
+          </span>
+        )}
       </div>
       {onSelect ? (
         <button className="lp-pick" aria-pressed={selected} title="この LP を変更する">
@@ -150,6 +194,9 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
   const lp = state.players[seat].lp;
   const name = displayName(state, seat);
   const [input, setInput] = useState('');
+  // 固定額のボタンの向き。回復のままだとダメージのつもりで回復してしまうので、1回押すと戻す
+  const [healKeys, setHealKeys] = useState(false);
+  const typing = !!input.trim();
 
   // 数値でも式でもよい。「1800」はダメージ、「+500」は回復、「=4000」は値の指定
   const submit = (mode?: LpOp['kind']) => {
@@ -159,7 +206,6 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
     else dispatch({ type: 'lpAdd', seat, delta: op.kind === 'heal' ? op.amount : -op.amount });
     setInput('');
   };
-  const typing = !!input.trim();
   const preview = typing ? parseLpInput(input) : null;
   const after =
     preview && Math.max(0, preview.kind === 'set' ? preview.amount : lp + (preview.kind === 'heal' ? preview.amount : -preview.amount));
@@ -170,7 +216,10 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
         <input
           className="lp-input"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setHealKeys(false);
+          }}
           onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
           placeholder={`${name}の LP`}
           title="数字か式(+ - * / と括弧)。Enter はダメージ。先頭に + で回復、= で値の指定"
@@ -178,7 +227,12 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
         <button onClick={() => submit('damage')} className="key danger">
           ダメージ
         </button>
-        <button className="key" onClick={() => submit('heal')}>
+        <button
+          className={healKeys ? 'key heal' : 'key'}
+          aria-pressed={healKeys}
+          title="入力した値だけ回復する。空のまま押すと、下のボタンが回復の額に変わる"
+          onClick={() => (typing ? submit('heal') : setHealKeys(!healKeys))}
+        >
           回復
         </button>
         <button className="key" onClick={() => submit('set')} title="入力した値を LP にする">
@@ -195,11 +249,25 @@ function LpEntry({ state, seat, dispatch }: { state: GameState; seat: Seat; disp
       ) : (
         <div className="row chips">
           {[100, 500, 1000].map((n) => (
-            <button key={n} className="key" onClick={() => dispatch({ type: 'lpAdd', seat, delta: -n })}>
-              −{n}
+            <button
+              key={n}
+              className={healKeys ? 'key heal' : 'key'}
+              onClick={() => {
+                dispatch({ type: 'lpAdd', seat, delta: healKeys ? n : -n });
+                setHealKeys(false);
+              }}
+            >
+              {healKeys ? '+' : '−'}
+              {n}
             </button>
           ))}
-          <button className="key" onClick={() => dispatch({ type: 'lpHalve', seat })}>
+          <button
+            className="key"
+            onClick={() => {
+              dispatch({ type: 'lpHalve', seat });
+              setHealKeys(false);
+            }}
+          >
             半分
           </button>
         </div>

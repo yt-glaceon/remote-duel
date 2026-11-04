@@ -507,6 +507,11 @@ input::placeholder {
   font-size: 13px;
   font-weight: 600;
 }
+.lp-undo {
+  flex: none;
+  padding: 0 6px;
+  font-size: 11px;
+}
 .lp-delta.down {
   color: var(--danger);
 }
@@ -556,6 +561,10 @@ input::placeholder {
 .chips button {
   flex: 1;
   padding: 3px;
+}
+.key.heal {
+  color: var(--ok);
+  border-color: var(--ok);
 }
 .lp-preview {
   display: flex;
