@@ -1124,6 +1124,5 @@ export class RoomClient {
     const snaps = [snap, ...this.view.snaps];
     snaps.slice(20).forEach((s) => URL.revokeObjectURL(s.url));
     this.set({ snaps: snaps.slice(0, 20) });
-    this.notify('撮影しました。「撮影」タブで見られます');
   }
 }

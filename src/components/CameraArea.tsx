@@ -43,25 +43,23 @@ export function OpponentCams({
       {cam ? (
         <>
           <div className="video-wrap">
-            <ZoomView
-              className="video-box"
-              tools={
-                <button type="button" className="zoom-tool" title="高画質で撮る" disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
-                  {view.snapBusy ? '撮影中…' : '撮る'}
-                </button>
-              }
-            >
+            <ZoomView className="video-box">
               <Rotated rotate={cam.rotate}>
                 <StreamVideo stream={cam.stream} className="video-fit" />
               </Rotated>
             </ZoomView>
             {cam.seat && <VideoTag state={state} seat={cam.seat} label={cam.label} />}
             {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
-            <span className="stage-hint">
-              <span>ホイールで拡大</span>
-              <span>ドラッグで移動</span>
-              <span>ダブルクリックで戻す</span>
-            </span>
+            <div className="stage-tools">
+              <button disabled={view.snapBusy} onClick={() => client.requestSnapshot(cam.peerId)}>
+                {view.snapBusy ? '撮影中…' : '高画質で撮る'}
+              </button>
+              <span className="stage-hint">
+                <span>ホイールで拡大</span>
+                <span>ドラッグで移動</span>
+                <span>ダブルクリックで戻す</span>
+              </span>
+            </div>
           </div>
         </>
       ) : (
@@ -239,7 +237,7 @@ function SelfPip({ feeds, client }: { feeds: SelfFeed[]; client: RoomClient }) {
 /** 撮った画像の一覧。新しいものが先頭。クリックで大きく表示する */
 export function Snapshots({ snaps, state }: { snaps: Snap[]; state: GameState }) {
   const [open, setOpen] = useState<Snap | null>(null);
-  if (snaps.length === 0) return <p className="tab-sec muted small">映像の「撮る」で撮った画像が、ここに並びます。</p>;
+  if (snaps.length === 0) return <p className="tab-sec muted small">「高画質で撮る」で撮った画像が、ここに並びます。</p>;
   return (
     <div className="tab-sec">
       <div className="snaps">

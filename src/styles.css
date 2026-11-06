@@ -360,11 +360,21 @@ input::placeholder {
 .video-tag .seven-seg {
   height: 22px;
 }
-.stage-hint {
+.stage-tools {
   position: absolute;
   left: 8px;
   bottom: 8px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+.stage-tools button {
+  background: rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
+}
+.stage-hint {
   display: none;
   gap: 12px;
   padding: 2px 8px;
@@ -1038,7 +1048,7 @@ input::placeholder {
   }
   /* 狭い画面の横並びは映像が小さいので、LP(すぐ下にある)と拡大のボタン(ピンチで足りる)を重ねない */
   .cam-split.cam-row .video-tag .lp-value,
-  .cam-split.cam-row .zoom-controls > :not(.zoom-tool) {
+  .cam-split.cam-row .zoom-controls {
     display: none;
   }
   .side {

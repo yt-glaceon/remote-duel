@@ -86,11 +86,12 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
     if (needsResult) setTab('duel');
   }, [needsResult]);
 
-  // 撮るのは細部を読むためなので、撮れたらすぐ見られるようにする
+  // 撮っても見ているタブは変えず、まだ見ていない画像があることだけをタブの印で知らせる
   const latestSnap = view.snaps[0]?.id;
+  const [seenSnap, setSeenSnap] = useState(latestSnap);
   useEffect(() => {
-    if (latestSnap) setTab('snaps');
-  }, [latestSnap]);
+    if (tab === 'snaps') setSeenSnap(latestSnap);
+  }, [tab, latestSnap]);
 
   const closeRoom = () => {
     if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
@@ -167,8 +168,12 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
               tab={tab === 'camera' && !seat ? 'room' : tab}
               onTab={setTab}
               hasCamera={!!seat}
-              // 自分の映像が相手に届いていないことと、勝敗の確定待ちは、タブを閉じていても分かるようにする
-              dots={{ camera: !!seat && selfFeeds(view, seat).length === 0, duel: needsResult && tab !== 'duel' }}
+              // 自分の映像が相手に届いていないこと、勝敗の確定待ち、まだ見ていない撮影は、タブを閉じていても分かるようにする
+              dots={{
+                camera: !!seat && selfFeeds(view, seat).length === 0,
+                duel: needsResult && tab !== 'duel',
+                snaps: latestSnap !== seenSnap && tab !== 'snaps',
+              }}
             >
               {{
                 duel: (
