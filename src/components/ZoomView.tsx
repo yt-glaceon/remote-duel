@@ -5,8 +5,8 @@ type T = { s: number; x: number; y: number };
 const IDENTITY: T = { s: 1, x: 0, y: 0 };
 const MAX_SCALE = 8;
 
-/** 中身をホイール・ピンチで拡大し、ドラッグで動かせる枠。ダブルクリックで元に戻る */
-export function ZoomView({ children, className = '' }: { children: ReactNode; className?: string }) {
+/** 中身をホイール・ピンチで拡大し、ドラッグで動かせる枠。ダブルクリックで元に戻る。tools は拡大のボタンの隣に並べる */
+export function ZoomView({ children, className = '', tools }: { children: ReactNode; className?: string; tools?: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [t, setT] = useState<T>(IDENTITY);
   const tRef = useRef(t);
@@ -94,6 +94,7 @@ export function ZoomView({ children, className = '' }: { children: ReactNode; cl
         {children}
       </div>
       <div className="zoom-controls" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        {tools}
         <button type="button" onClick={() => zoomCenter(1.5)} aria-label="拡大">＋</button>
         <button type="button" onClick={() => zoomCenter(1 / 1.5)} aria-label="縮小">－</button>
         <button type="button" onClick={() => setT(IDENTITY)} aria-label="元の大きさ">{t.s.toFixed(1)}×</button>

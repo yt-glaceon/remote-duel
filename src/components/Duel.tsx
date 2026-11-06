@@ -10,10 +10,11 @@ import { Modal, StatusPill, Toast } from './common';
 import { ResultPanel } from './ResultPanel';
 import { ChainPanel, FirstPlayer, LogPanel, LpBoard, RollFlash, RollPanel, TurnBar } from './SidePanels';
 
-type Tab = 'duel' | 'camera' | 'room' | 'log';
+type Tab = 'duel' | 'camera' | 'snaps' | 'room' | 'log';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'duel', label: 'デュエル' },
   { id: 'camera', label: 'カメラ' },
+  { id: 'snaps', label: '撮影' },
   { id: 'room', label: '部屋' },
   { id: 'log', label: '履歴' },
 ];
@@ -85,6 +86,12 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
     if (needsResult) setTab('duel');
   }, [needsResult]);
 
+  // 撮るのは細部を読むためなので、撮れたらすぐ見られるようにする
+  const latestSnap = view.snaps[0]?.id;
+  useEffect(() => {
+    if (latestSnap) setTab('snaps');
+  }, [latestSnap]);
+
   const closeRoom = () => {
     if (!confirm('部屋を閉じますか?相手との接続を切り、この部屋の保存データ(LP・履歴・戦績)を消します。')) return;
     client.closeRoom();
@@ -150,7 +157,6 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
             ) : (
               <SpectatorCams view={view} client={client} state={state} layout={camLayout} />
             )}
-            <Snapshots snaps={view.snaps} state={state} />
           </section>
           <aside className="side">
             <LpBoard state={state} me={me} dispatch={dispatch} readOnly={readOnly} />
@@ -173,6 +179,7 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
                   </div>
                 ),
                 camera: seat && <MyCamera view={view} client={client} me={me} onPhone={() => setShowPhone(true)} />,
+                snaps: <Snapshots snaps={view.snaps} state={state} />,
                 room: (
                   <>
                     <SeatsPanel view={view} client={client} state={state} isHost={isHost} />

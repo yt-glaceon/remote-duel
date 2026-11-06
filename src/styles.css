@@ -360,21 +360,11 @@ input::placeholder {
 .video-tag .seven-seg {
   height: 22px;
 }
-.stage-tools {
+.stage-hint {
   position: absolute;
   left: 8px;
   bottom: 8px;
   z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  pointer-events: none;
-}
-.stage-tools button {
-  background: rgba(0, 0, 0, 0.65);
-  pointer-events: auto;
-}
-.stage-hint {
   display: none;
   gap: 12px;
   padding: 2px 8px;
@@ -447,20 +437,13 @@ input::placeholder {
   cursor: zoom-in;
 }
 
-.snap-strip {
-  flex: none;
-  padding: 4px 12px 6px;
-  background: var(--panel);
-}
 .snaps {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  overflow-x: auto;
 }
 .snap-thumb {
-  flex: none;
-  width: 96px;
-  height: 54px;
+  aspect-ratio: 16 / 9;
   padding: 0;
   overflow: hidden;
   background: #000;
@@ -1055,7 +1038,7 @@ input::placeholder {
   }
   /* 狭い画面の横並びは映像が小さいので、LP(すぐ下にある)と拡大のボタン(ピンチで足りる)を重ねない */
   .cam-split.cam-row .video-tag .lp-value,
-  .cam-split.cam-row .zoom-controls {
+  .cam-split.cam-row .zoom-controls > :not(.zoom-tool) {
     display: none;
   }
   .side {
