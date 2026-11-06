@@ -250,6 +250,30 @@ input::placeholder {
   color: var(--text);
 }
 
+/* 観戦者の画面。2人の映像を黒い隙間で分けて並べる */
+.cam-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 4px;
+}
+.cam-split.cam-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.cam-split.cam-col {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+/* 映像の枠が狭くなるので、拡大の説明は重ねない */
+.cam-split .stage-hint {
+  display: none !important;
+}
+.cam-split .placeholder {
+  padding: 16px;
+}
+.cam-split .placeholder h2 {
+  font-size: 16px;
+}
+
 /* 映像と拡大 */
 .video-wrap {
   position: relative;
@@ -1023,6 +1047,15 @@ input::placeholder {
   }
   /* 狭い画面では LP の行が映像のすぐ下にあるので、カードを隠さないよう重ねない */
   .video-tag {
+    display: none;
+  }
+  /* 観戦中は映像が2つあるので、どちらの映像かを出す */
+  .cam-split .video-tag {
+    display: flex;
+  }
+  /* 狭い画面の横並びは映像が小さいので、LP(すぐ下にある)と拡大のボタン(ピンチで足りる)を重ねない */
+  .cam-split.cam-row .video-tag .lp-value,
+  .cam-split.cam-row .zoom-controls {
     display: none;
   }
   .side {

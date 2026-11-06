@@ -61,6 +61,15 @@ export const saveName = (name: string) => safeSet(localStorage, 'ygord-name', na
 export const loadCamRotate = () => Number(safeGet(localStorage, 'ygord-cam-rotate') ?? 0);
 export const saveCamRotate = (r: number) => safeSet(localStorage, 'ygord-cam-rotate', String(r));
 
+/** 観戦するときの映像の並び(row は横、col は縦)。画面の形は端末で決まるので、端末ごとに覚える。既定は画面の幅で決める */
+export type CamLayout = 'row' | 'col';
+export const loadCamLayout = (): CamLayout => {
+  const v = safeGet(localStorage, 'ygord-cam-layout');
+  if (v === 'row' || v === 'col') return v;
+  return matchMedia('(max-width: 900px)').matches ? 'col' : 'row';
+};
+export const saveCamLayout = (v: CamLayout) => safeSet(localStorage, 'ygord-cam-layout', v);
+
 /** 部屋 ID はホストの公開鍵のハッシュ(net/hostKey.ts)。ゲストはこれでホストの署名を確かめる */
 export const ROOM_RE = /^[0-9a-f]{32}$/;
 /** 画面に出すときの短い部屋 ID */

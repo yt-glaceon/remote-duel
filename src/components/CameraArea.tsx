@@ -1,34 +1,33 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { displayName, type GameState, type Seat } from '../game/state';
+import { displayName, SEATS, type GameState, type Seat } from '../game/state';
+import type { CamLayout } from '../identity';
 import { listCameras, nextRotation, openCamera, stopStream, TEST_PATTERN_ID, type Rotation } from '../media/camera';
 import type { RoomClient, Snap, View } from '../net/room';
 import { Modal } from './common';
 import { VideoTag } from './SidePanels';
 import { Rotated, StreamVideo, ZoomView } from './ZoomView';
 
-/** 見たい席(プレイヤーなら相手、観戦者なら両方)の映像を大きく表示する。複数あればタブで切り替える */
+/** 1つの席の映像を大きく表示する。その席に複数のカメラがあればタブで切り替える */
 export function OpponentCams({
   view,
   client,
-  seats,
+  seat,
   me,
   state,
   empty,
 }: {
   view: View;
   client: RoomClient;
-  seats: Seat[];
+  seat: Seat;
   /** プレイヤーなら自分の席。自分のカメラを隅に小さく出す。観戦者は null */
   me: Seat | null;
   state: GameState;
   /** 映像がないときに、映像の枠に出す案内 */
   empty: ReactNode;
 }) {
-  // 席が確定していない映像は表示しない
-  const cams = view.cams.filter((c) => c.seat && seats.includes(c.seat));
+  const cams = view.cams.filter((c) => c.seat === seat);
   const [selected, setSelected] = useState<string | null>(null);
   const cam = cams.find((c) => c.peerId === selected) ?? cams[0];
-  const watching = seats.length > 1;
 
   return (
     <div className="stage-main">
@@ -36,7 +35,6 @@ export function OpponentCams({
         <div className="tabs">
           {cams.map((c) => (
             <button key={c.peerId} className={c === cam ? 'active' : ''} onClick={() => setSelected(c.peerId)}>
-              {watching && c.seat ? `${displayName(state, c.seat)}の` : ''}
               {c.label}
             </button>
           ))}
@@ -72,6 +70,25 @@ export function OpponentCams({
           {me && <SelfPip feeds={selfFeeds(view, me)} client={client} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 観戦者の画面。両方のプレイヤーの映像を、P1 を左(縦並びなら上)にして並べる */
+export function SpectatorCams({ view, client, state, layout }: { view: View; client: RoomClient; state: GameState; layout: CamLayout }) {
+  return (
+    <div className={`cam-split cam-${layout}`}>
+      {SEATS.map((s) => (
+        <OpponentCams
+          key={s}
+          view={view}
+          client={client}
+          seat={s}
+          me={null}
+          state={state}
+          empty={<h2>{displayName(state, s)}のカメラを待っています</h2>}
+        />
+      ))}
     </div>
   );
 }

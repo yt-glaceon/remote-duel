@@ -1,11 +1,11 @@
 import QRCode from 'qrcode';
 import { useEffect, useState, type ReactNode } from 'react';
 import { canChangeSeats, displayName, other, SEATS, type Action, type GameState, type Seat } from '../game/state';
-import { forgetCamKey, getCamKey, getClientId, loadName, renewCamKey, roomUrl, shortRoom } from '../identity';
+import { forgetCamKey, getCamKey, getClientId, loadCamLayout, loadName, renewCamKey, roomUrl, saveCamLayout, shortRoom } from '../identity';
 import { deleteHostKey, loadHostKey, type HostKey } from '../net/hostKey';
 import { ROOM_CLOSED_TEXT, SPECTATOR_MAX, type PublicMember, type RoomClient, type View } from '../net/room';
 import { useRoom } from '../net/useRoom';
-import { MyCamera, OpponentCams, selfFeeds, Snapshots } from './CameraArea';
+import { MyCamera, OpponentCams, selfFeeds, Snapshots, SpectatorCams } from './CameraArea';
 import { Modal, StatusPill, Toast } from './common';
 import { ResultPanel } from './ResultPanel';
 import { ChainPanel, FirstPlayer, LogPanel, LpBoard, RollFlash, RollPanel, TurnBar } from './SidePanels';
@@ -58,6 +58,7 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
   const [copied, setCopied] = useState(false);
   // 観戦者は、まず席や参加者の様子を見たいので部屋のタブから始める
   const [tab, setTab] = useState<Tab>(spectator ? 'room' : 'duel');
+  const [camLayout, setCamLayout] = useState(loadCamLayout);
   const { state, seat } = view;
   const me = seat ?? 'p1';
   const readOnly = !seat || view.status === 'full';
@@ -67,6 +68,12 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
     await navigator.clipboard.writeText(roomUrl(room)).catch(() => prompt('招待リンク', roomUrl(room)));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const toggleCamLayout = () => {
+    const next = camLayout === 'row' ? 'col' : 'row';
+    setCamLayout(next);
+    saveCamLayout(next);
   };
 
   const seatTaken = (s: Seat) => view.members.some((m) => m.role === 'player' && m.seat === s);
@@ -111,6 +118,11 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
         {view.detail && view.detail !== '観戦中' && <span className="muted small">{view.detail}</span>}
         <span className="spacer" />
         {watchers.length > 0 && <span className="muted small">観戦 {watchers.length}</span>}
+        {state && !seat && (
+          <button className="small-btn" onClick={toggleCamLayout}>
+            {camLayout === 'row' ? '縦に並べる' : '横に並べる'}
+          </button>
+        )}
       </header>
 
       {!state ? (
@@ -118,23 +130,26 @@ export function Duel({ room, hostKey, spectator }: { room: string; hostKey: Host
       ) : (
         <main className="duel">
           <section className="stage">
-            {/* 観戦者は両方のプレイヤーの映像を見る */}
-            <OpponentCams
-              view={view}
-              client={client}
-              seats={seat ? [other(me)] : ['p1', 'p2']}
-              me={seat}
-              state={state}
-              empty={
-                <BlankSlate
-                  view={view}
-                  waitingOpponent={!!seat && !seatTaken(other(seat))}
-                  copied={copied}
-                  onInvite={() => void copyInvite()}
-                  onCamera={() => setTab('camera')}
-                />
-              }
-            />
+            {seat ? (
+              <OpponentCams
+                view={view}
+                client={client}
+                seat={other(seat)}
+                me={seat}
+                state={state}
+                empty={
+                  <BlankSlate
+                    view={view}
+                    waitingOpponent={!seatTaken(other(seat))}
+                    copied={copied}
+                    onInvite={() => void copyInvite()}
+                    onCamera={() => setTab('camera')}
+                  />
+                }
+              />
+            ) : (
+              <SpectatorCams view={view} client={client} state={state} layout={camLayout} />
+            )}
             <Snapshots snaps={view.snaps} state={state} />
           </section>
           <aside className="side">
@@ -238,7 +253,7 @@ function BlankSlate({
   const noCamera = !!seat && selfFeeds(view, seat).length === 0;
   return (
     <>
-      <h2>{waitingOpponent ? '相手を待っています' : seat ? '相手のカメラを待っています' : 'プレイヤーのカメラを待っています'}</h2>
+      <h2>{waitingOpponent ? '相手を待っています' : '相手のカメラを待っています'}</h2>
       {waitingOpponent && <p className="muted">招待リンクを送ると、相手はブラウザだけで参加できます。</p>}
       <div className="row">
         {waitingOpponent && (
